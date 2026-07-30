@@ -179,54 +179,65 @@ function AuthBar({ user, onOpenSignIn, onSignOut }) {
   );
 }
 
-function SignInPanel({ onClose }) {
+function AuthPanel({ onClose }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [checkEmail, setCheckEmail] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSend() {
-    if (!email.includes("@")) {
-      setError("Enter a valid email.");
-      return;
-    }
+  async function handleSubmit() {
+    if (!email.includes("@")) { setError("Enter a valid email."); return; }
+    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
     setError("");
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
-    });
-    if (err) setError(err.message);
-    else setSent(true);
+    setSubmitting(true);
+    if (mode === "signup") {
+      const { error: err } = await supabase.auth.signUp({ email, password });
+      if (err) setError(err.message);
+      else setCheckEmail(true);
+    } else {
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      if (err) setError(err.message);
+      else onClose();
+    }
+    setSubmitting(false);
   }
 
   return (
     <div className="fixed inset-0" style={{ zIndex: 60 }}>
-      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={sent ? undefined : onClose} />
+      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={checkEmail ? undefined : onClose} />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm rounded-2xl p-5" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between mb-3">
-          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>Sign in</span>
-          {!sent && <button onClick={onClose}><X size={18} color="#64809A" /></button>}
+          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{mode === "signup" ? "Create account" : "Sign in"}</span>
+          {!checkEmail && <button onClick={onClose}><X size={18} color="#64809A" /></button>}
         </div>
-        {sent ? (
+
+        {checkEmail ? (
           <div>
             <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">
-              Check your email — we sent a sign-in link to {email}. Click it and you'll be signed in automatically.
+              Almost there — we sent a confirmation link to {email}. Click it, then come back and sign in with your new password.
             </p>
             <PrimaryButton onClick={onClose}>OK</PrimaryButton>
           </div>
         ) : (
           <div className="space-y-3">
-            <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>
-              We'll email you a link to sign in — no password needed. Your email is never shown publicly.
-            </p>
+            <div className="flex rounded-full p-1" style={{ background: "#EAF3FB" }}>
+              <button onClick={() => { setMode("signin"); setError(""); }} className="flex-1 py-1.5 rounded-full text-[13px] font-semibold" style={{ fontFamily: "'Inter'", background: mode === "signin" ? "#FFFFFF" : "transparent", color: "#16324A" }}>Sign in</button>
+              <button onClick={() => { setMode("signup"); setError(""); }} className="flex-1 py-1.5 rounded-full text-[13px] font-semibold" style={{ fontFamily: "'Inter'", background: mode === "signup" ? "#FFFFFF" : "transparent", color: "#16324A" }}>Create account</button>
+            </div>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>Your email is never shown publicly.</p>
             <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (6+ characters)" />
             {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
-            <PrimaryButton onClick={handleSend}>Send sign-in link</PrimaryButton>
+            <PrimaryButton onClick={handleSubmit}>{submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</PrimaryButton>
           </div>
         )}
       </div>
     </div>
   );
 }
+
 
 function SignInPrompt({ onOpenSignIn }) {
   return (
@@ -798,15 +809,76 @@ function ContactPage({ onBack }) {
     </StaticPage>
   );
 }
-function AccountPage({ onBack, user, onOpenSignIn }) {
+function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit }) {
+  const [myHospitalReviews, setMyHospitalReviews] = useState([]);
+  const [myUnitReviews, setMyUnitReviews] = useState([]);
+  const [loadingMine, setLoadingMine] = useState(true);
+
+  useEffect(() => {
+    if (!user) { setLoadingMine(false); return; }
+    async function load() {
+      setLoadingMine(true);
+      const { data: hData } = await supabase
+        .from("hospital_reviews")
+        .select("*, hospitals(id, name, city)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      const { data: uData } = await supabase
+        .from("unit_reviews")
+        .select("*, units(id, name, floor, type, hospital_id, hospitals(id, name, city))")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      setMyHospitalReviews(hData || []);
+      setMyUnitReviews(uData || []);
+      setLoadingMine(false);
+    }
+    load();
+  }, [user]);
+
+  if (!user) {
+    return (
+      <StaticPage title="My Account" onBack={onBack}>
+        <p>Sign in to create your account and see the reports you've posted, all in one place.</p>
+        <PrimaryButton onClick={onOpenSignIn}>Sign in</PrimaryButton>
+      </StaticPage>
+    );
+  }
+
   return (
-    <StaticPage title="Create an account" onBack={onBack}>
-      {user ? (
-        <p>You're signed in as <strong>{user.email}</strong>. That's your account — no separate signup needed.</p>
-      ) : (
+    <StaticPage title="My Account" onBack={onBack}>
+      <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>Signed in as <strong>{user.email}</strong></p>
+
+      {loadingMine && <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#64809A" }} className="pt-2">Loading your reports…</p>}
+
+      {!loadingMine && (
         <>
-          <p>Signing in with your email creates your account automatically — no separate signup step, no password to remember.</p>
-          <PrimaryButton onClick={onOpenSignIn}>Sign in</PrimaryButton>
+          <div className="pt-3">
+            <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Hospital reports ({myHospitalReviews.length})</h2>
+            {myHospitalReviews.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't rated any hospitals yet.</p>}
+            <div className="space-y-2">
+              {myHospitalReviews.map((r) => (
+                <button key={r.id} onClick={() => onGoToHospital(r.hospitals)} className="w-full text-left rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.hospitals?.name}</div>
+                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.hospitals?.city} · {(r.created_at || "").slice(0, 10)}</div>
+                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4">
+            <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Unit reports ({myUnitReviews.length})</h2>
+            {myUnitReviews.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't rated any units yet.</p>}
+            <div className="space-y-2">
+              {myUnitReviews.map((r) => (
+                <button key={r.id} onClick={() => onGoToUnit(r.units?.hospitals, r.units)} className="w-full text-left rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.units?.name}</div>
+                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.units?.hospitals?.name} · {(r.created_at || "").slice(0, 10)}</div>
+                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                </button>
+              ))}
+            </div>
+          </div>
         </>
       )}
     </StaticPage>
@@ -816,7 +888,7 @@ function AccountPage({ onBack, user, onOpenSignIn }) {
 function SideMenu({ open, onClose, onNavigate }) {
   const items = [
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
-    { key: "account", label: "Create an account" }, { key: "about", label: "What's the goal?" },
+    { key: "account", label: "My Account" }, { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];
   if (!open) return null;
@@ -939,7 +1011,7 @@ export default function App() {
       </header>
 
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={handleMenuNavigate} />
-      {signInOpen && <SignInPanel onClose={() => setSignInOpen(false)} />}
+      {signInOpen && <AuthPanel onClose={() => setSignInOpen(false)} />}
 
       <main className="max-w-2xl mx-auto px-5 py-8">
         {view.page === "home" && <HomeView hospitals={hospitals} onSelectHospital={(h) => setView({ page: "hospital", hospital: h })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
@@ -993,7 +1065,15 @@ export default function App() {
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "account" && <AccountPage onBack={() => setView(view.from || { page: "home" })} user={user} onOpenSignIn={() => setSignInOpen(true)} />}
+        {view.page === "account" && (
+          <AccountPage
+            onBack={() => setView(view.from || { page: "home" })}
+            user={user}
+            onOpenSignIn={() => setSignInOpen(true)}
+            onGoToHospital={(h) => setView({ page: "hospital", hospital: h })}
+            onGoToUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: { page: "account" } })}
+          />
+        )}
       </main>
     </div>
   );

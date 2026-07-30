@@ -200,16 +200,19 @@ function SignInPanel({ onClose }) {
 
   return (
     <div className="fixed inset-0" style={{ zIndex: 60 }}>
-      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={onClose} />
+      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={sent ? undefined : onClose} />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm rounded-2xl p-5" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between mb-3">
           <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>Sign in</span>
-          <button onClick={onClose}><X size={18} color="#64809A" /></button>
+          {!sent && <button onClick={onClose}><X size={18} color="#64809A" /></button>}
         </div>
         {sent ? (
-          <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>
-            Check your email — we sent a sign-in link to {email}. Click it and you'll be signed in automatically.
-          </p>
+          <div>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">
+              Check your email — we sent a sign-in link to {email}. Click it and you'll be signed in automatically.
+            </p>
+            <PrimaryButton onClick={onClose}>OK</PrimaryButton>
+          </div>
         ) : (
           <div className="space-y-3">
             <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>
@@ -475,7 +478,7 @@ function CompareView({ type, base, hospitals, onBack }) {
   );
 }
 
-function UnitView({ hospital, unit, onBack, onAddReview, onClaim, onVote, userVotes, onCompare, user, onOpenSignIn }) {
+function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onClaim, onVote, userVotes, onCompare, user, onOpenSignIn }) {
   const [showForm, setShowForm] = useState(false);
   const [showClaim, setShowClaim] = useState(false);
   const [reviewSort, setReviewSort] = useState("newest");
@@ -490,7 +493,10 @@ function UnitView({ hospital, unit, onBack, onAddReview, onClaim, onVote, userVo
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> {hospital.name}</button>
+      <div className="flex items-center gap-4 mb-4">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+        <button onClick={onBackToHospital} className="text-[13px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>{hospital.name}</button>
+      </div>
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-1" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Floor {unit.floor} · {unit.type}</div>
       <div className="flex items-center gap-2 flex-wrap">
         <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.7rem", color: "#16324A" }}>{unit.name}</h1>
@@ -937,13 +943,13 @@ export default function App() {
 
       <main className="max-w-2xl mx-auto px-5 py-8">
         {view.page === "home" && <HomeView hospitals={hospitals} onSelectHospital={(h) => setView({ page: "hospital", hospital: h })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
-        {view.page === "allUnits" && <AllUnitsView hospitals={hospitals} onSelectUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
+        {view.page === "allUnits" && <AllUnitsView hospitals={hospitals} onSelectUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: view })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
 
         {view.page === "hospital" && (
           <HospitalView
             hospital={hospitals.find((h) => h.id === view.hospital.id)}
             onBack={() => setView({ page: "home" })}
-            onSelectUnit={(u) => setView({ page: "unit", hospital: view.hospital, unit: u })}
+            onSelectUnit={(u) => setView({ page: "unit", hospital: view.hospital, unit: u, from: view })}
             onAddReview={addHospitalReview}
             onVote={castVote}
             userVotes={userVotes}
@@ -958,7 +964,8 @@ export default function App() {
           <UnitView
             hospital={view.hospital}
             unit={hospitals.find((h) => h.id === view.hospital.id).units.find((u) => u.id === view.unit.id)}
-            onBack={() => setView({ page: "hospital", hospital: view.hospital })}
+            onBack={() => setView(view.from || { page: "hospital", hospital: view.hospital })}
+            onBackToHospital={() => setView({ page: "hospital", hospital: view.hospital })}
             onAddReview={addUnitReview}
             onClaim={addClaim}
             onVote={castVote}

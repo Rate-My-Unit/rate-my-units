@@ -193,6 +193,17 @@ function AuthPanel({ onClose }) {
   const [error, setError] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [countdown, setCountdown] = useState(30);
+  const [resendMsg, setResendMsg] = useState("");
+
+  useEffect(() => {
+    if (!checkEmail) return;
+    setCountdown(30);
+    const interval = setInterval(() => {
+      setCountdown((c) => (c > 0 ? c - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [checkEmail]);
 
   async function handleSubmit() {
     if (!email.includes("@")) { setError("Enter a valid email."); return; }
@@ -211,6 +222,14 @@ function AuthPanel({ onClose }) {
     setSubmitting(false);
   }
 
+  async function handleResend() {
+    setResendMsg("");
+    const { error: err } = await supabase.auth.resend({ type: "signup", email });
+    if (err) setResendMsg(err.message);
+    else setResendMsg("Sent again — check your email.");
+    setCountdown(30);
+  }
+
   return (
     <div className="fixed inset-0" style={{ zIndex: 60 }}>
       <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={checkEmail ? undefined : onClose} />
@@ -225,6 +244,12 @@ function AuthPanel({ onClose }) {
             <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">
               Almost there — we sent a confirmation link to {email}. Click it, then come back and sign in with your new password.
             </p>
+            {countdown > 0 ? (
+              <p style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#64809A" }} className="mb-3">Didn't get it? You can resend in {countdown}s.</p>
+            ) : (
+              <button onClick={handleResend} className="text-[13px] font-semibold mb-3 block" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Send another verification email</button>
+            )}
+            {resendMsg && <p style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132" }} className="mb-3">{resendMsg}</p>}
             <PrimaryButton onClick={onClose}>OK</PrimaryButton>
           </div>
         ) : (
@@ -850,6 +875,52 @@ function ContactPage({ onBack }) {
     </StaticPage>
   );
 }
+function ChangePasswordForm() {
+  const [open, setOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit() {
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirm) { setError("Passwords don't match."); return; }
+    setError("");
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+    setSubmitting(false);
+    if (err) setError(err.message);
+    else {
+      setSuccess(true);
+      setNewPassword("");
+      setConfirm("");
+    }
+  }
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="text-[13px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Change password</button>;
+  }
+
+  return (
+    <div className="rounded-xl p-4 mt-2" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+      {success ? (
+        <p style={{ color: "#0F5132", fontWeight: 600, fontFamily: "'Inter'", fontSize: "13.5px" }}>✓ Password updated.</p>
+      ) : (
+        <div className="space-y-3">
+          <TextInput type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password (6+ characters)" />
+          <TextInput type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirm new password" />
+          {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
+          <div className="flex gap-2">
+            <PrimaryButton onClick={handleSubmit}>{submitting ? "Updating…" : "Update password"}</PrimaryButton>
+            <GhostButton onClick={() => setOpen(false)}>Cancel</GhostButton>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit }) {
   const [myHospitalReviews, setMyHospitalReviews] = useState([]);
   const [myUnitReviews, setMyUnitReviews] = useState([]);
@@ -888,6 +959,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit })
   return (
     <StaticPage title="My Account" onBack={onBack}>
       <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>Signed in as <strong>{user.email}</strong></p>
+      <div className="pt-1"><ChangePasswordForm /></div>
 
       {loadingMine && <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#64809A" }} className="pt-2">Loading your reports…</p>}
 

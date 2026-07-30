@@ -188,6 +188,7 @@ function AuthBar({ user, onOpenSignIn, onSignOut }) {
 
 function AuthPanel({ onClose }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup"
+  const [screen, setScreen] = useState("auth"); // "auth" | "forgot" | "forgotSent"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -204,6 +205,18 @@ function AuthPanel({ onClose }) {
     }, 1000);
     return () => clearInterval(interval);
   }, [checkEmail]);
+
+  async function handleForgotSubmit() {
+    if (!email.includes("@")) { setError("Enter a valid email."); return; }
+    setError("");
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+    });
+    setSubmitting(false);
+    if (err) setError(err.message);
+    else setScreen("forgotSent");
+  }
 
   async function handleSubmit() {
     if (!email.includes("@")) { setError("Enter a valid email."); return; }
@@ -232,14 +245,37 @@ function AuthPanel({ onClose }) {
 
   return (
     <div className="fixed inset-0" style={{ zIndex: 60 }}>
-      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={checkEmail ? undefined : onClose} />
+      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.35)" }} onClick={checkEmail || screen === "forgotSent" ? undefined : onClose} />
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm rounded-2xl p-5" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between mb-3">
-          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{mode === "signup" ? "Create account" : "Sign in"}</span>
-          {!checkEmail && <button onClick={onClose}><X size={18} color="#64809A" /></button>}
+          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>
+            {screen === "forgot" || screen === "forgotSent" ? "Reset password" : mode === "signup" ? "Create account" : "Sign in"}
+          </span>
+          {!checkEmail && screen !== "forgotSent" && <button onClick={onClose}><X size={18} color="#64809A" /></button>}
         </div>
 
-        {checkEmail ? (
+        {screen === "forgot" && (
+          <div className="space-y-3">
+            <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>Enter the email you signed up with — we'll send a link to reset your password.</p>
+            <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
+            <div className="flex gap-2">
+              <PrimaryButton onClick={handleForgotSubmit}>{submitting ? "Sending…" : "Send reset link"}</PrimaryButton>
+              <GhostButton onClick={() => { setScreen("auth"); setError(""); }}>Back</GhostButton>
+            </div>
+          </div>
+        )}
+
+        {screen === "forgotSent" && (
+          <div>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">
+              Check your email — we sent a link to {email} to reset your password.
+            </p>
+            <PrimaryButton onClick={onClose}>OK</PrimaryButton>
+          </div>
+        )}
+
+        {screen === "auth" && (checkEmail ? (
           <div>
             <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">
               Almost there — we sent a confirmation link to {email}. Click it, then come back and sign in with your new password.
@@ -261,10 +297,13 @@ function AuthPanel({ onClose }) {
             <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>Your email is never shown publicly.</p>
             <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (6+ characters)" />
+            {mode === "signin" && (
+              <button onClick={() => { setScreen("forgot"); setError(""); }} className="text-[12.5px] font-semibold block" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Forgot password?</button>
+            )}
             {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
             <PrimaryButton onClick={handleSubmit}>{submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</PrimaryButton>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -1021,6 +1060,47 @@ function SideMenu({ open, onClose, onNavigate }) {
   );
 }
 
+function SetNewPasswordPanel({ onDone }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit() {
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirm) { setError("Passwords don't match."); return; }
+    setError("");
+    setSubmitting(true);
+    const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+    setSubmitting(false);
+    if (err) setError(err.message);
+    else setSuccess(true);
+  }
+
+  return (
+    <div className="fixed inset-0" style={{ zIndex: 70 }}>
+      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.45)" }} />
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm rounded-2xl p-5" style={{ background: "#FFFFFF" }}>
+        <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }} className="block mb-3">Set a new password</span>
+        {success ? (
+          <div>
+            <p style={{ color: "#0F5132", fontWeight: 600, fontFamily: "'Inter'", fontSize: "13.5px" }} className="mb-4">✓ Password updated. You're signed in.</p>
+            <PrimaryButton onClick={onDone}>OK</PrimaryButton>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <TextInput type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password (6+ characters)" />
+            <TextInput type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirm new password" />
+            {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
+            <PrimaryButton onClick={handleSubmit}>{submitting ? "Updating…" : "Update password"}</PrimaryButton>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1029,6 +1109,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [signInOpen, setSignInOpen] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   async function fetchHospitals() {
     const { data, error } = await supabase
@@ -1042,7 +1123,10 @@ export default function App() {
   useEffect(() => {
     fetchHospitals();
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -1127,6 +1211,7 @@ export default function App() {
 
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={handleMenuNavigate} />
       {signInOpen && <AuthPanel onClose={() => setSignInOpen(false)} />}
+      {recoveryMode && <SetNewPasswordPanel onDone={() => setRecoveryMode(false)} />}
 
       <main className="max-w-2xl mx-auto px-5 py-8">
         {view.page === "home" && <HomeView hospitals={hospitals} onSelectHospital={(h) => setView({ page: "hospital", hospital: h })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}

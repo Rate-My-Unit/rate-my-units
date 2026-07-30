@@ -122,7 +122,14 @@ function ReviewCard({ review, categories, userVote, onVote }) {
   return (
     <div className="py-4" style={{ borderTop: "1px solid #EEF4FA" }}>
       <div className="flex items-center justify-between mb-2">
-        <div style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A", fontSize: "0.95rem" }}>{review.role}</div>
+        <div className="flex items-center gap-1.5">
+          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A", fontSize: "0.95rem" }}>{review.role}</span>
+          {review.verified && (
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'", fontWeight: 700, fontSize: "10.5px" }}>
+              <ShieldCheck size={11} /> Verified
+            </span>
+          )}
+        </div>
         <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{(review.created_at || "").slice(0, 10)}</div>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-2.5">
@@ -248,12 +255,16 @@ function SignInPrompt({ onOpenSignIn }) {
   );
 }
 
-function ReviewForm({ categories, onSubmit, onCancel, rolePlaceholder, user, onOpenSignIn }) {
+function ReviewForm({ categories, reviewType, onSubmit, onCancel, onDone, rolePlaceholder, user, onOpenSignIn }) {
   const [role, setRole] = useState("");
   const [ratings, setRatings] = useState(Object.fromEntries(categories.map((c) => [c.key, 0])));
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [step, setStep] = useState("form"); // "form" | "verify"
+  const [newReviewId, setNewReviewId] = useState(null);
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   if (!user) return <SignInPrompt onOpenSignIn={onOpenSignIn} />;
 
@@ -263,8 +274,37 @@ function ReviewForm({ categories, onSubmit, onCancel, rolePlaceholder, user, onO
       return;
     }
     setSubmitting(true);
-    await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
+    const id = await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
     setSubmitting(false);
+    if (id) { setNewReviewId(id); setStep("verify"); } else { onDone(); }
+  }
+
+  async function handleUploadProof() {
+    if (!file) { onDone(); return; }
+    setUploading(true);
+    const path = `${user.id}/${reviewType}-${newReviewId}-${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("verification-proof").upload(path, file);
+    if (!upErr) {
+      await supabase.from("verifications").insert({ review_id: newReviewId, review_type: reviewType, user_id: user.id, file_path: path });
+    }
+    setUploading(false);
+    onDone();
+  }
+
+  if (step === "verify") {
+    return (
+      <div className="rounded-2xl p-5 mt-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+        <div className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ fontFamily: "'Inter'", color: "#0F9D6A" }}>✓ Report posted</div>
+        <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-3">
+          Want a <strong>Verified</strong> badge on your report? Upload something showing you worked there — a badge photo, pay stub, or assignment letter. It's reviewed privately and never shown publicly.
+        </p>
+        <input type="file" accept="image/*,.pdf" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm mb-3" style={{ fontFamily: "'Inter'", color: "#33475A" }} />
+        <div className="flex gap-2">
+          <PrimaryButton onClick={handleUploadProof} color="#0F9D6A">{uploading ? "Uploading…" : file ? "Submit proof" : "Skip for now"}</PrimaryButton>
+          {file && <GhostButton onClick={onDone}>Skip</GhostButton>}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -290,6 +330,7 @@ function ReviewForm({ categories, onSubmit, onCancel, rolePlaceholder, user, onO
         {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
         <div className="flex gap-2">
           <PrimaryButton onClick={handleSubmit}>{submitting ? "Posting…" : "Post report"}</PrimaryButton>
+
           <GhostButton onClick={onCancel}>Cancel</GhostButton>
         </div>
       </div>
@@ -535,7 +576,7 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onCla
         </div>
       </div>
 
-      {showForm && <ReviewForm categories={UNIT_CATEGORIES} rolePlaceholder="e.g. RN, Nights" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={async (rev) => { await onAddReview(unit.id, rev); setShowForm(false); }} />}
+      {showForm && <ReviewForm categories={UNIT_CATEGORIES} reviewType="unit" rolePlaceholder="e.g. RN, Nights" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={(rev) => onAddReview(unit.id, rev)} onDone={() => setShowForm(false)} />}
 
       <div>
         {reviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No reports yet on this unit. Be the first to file one.</p>}
@@ -599,7 +640,7 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onVote, use
               {!showForm && <button onClick={() => setShowForm(true)} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[13px] text-white font-semibold" style={{ background: "#0F9D6A", fontFamily: "'Inter'" }}><Plus size={14} /> Rate this hospital</button>}
             </div>
           </div>
-          {showForm && <ReviewForm categories={HOSPITAL_CATEGORIES} rolePlaceholder="e.g. RN, Emergency" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={async (rev) => { await onAddReview(hospital.id, rev); setShowForm(false); }} />}
+          {showForm && <ReviewForm categories={HOSPITAL_CATEGORIES} reviewType="hospital" rolePlaceholder="e.g. RN, Emergency" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={(rev) => onAddReview(hospital.id, rev)} onDone={() => setShowForm(false)} />}
           <div>
             {hReviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No hospital-wide reports yet. Be the first to file one.</p>}
             {sortedHospitalReviews.map((r) => <ReviewCard key={r.id} review={r} categories={HOSPITAL_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("hospital", id, dir)} />)}
@@ -934,12 +975,14 @@ export default function App() {
   }, []);
 
   async function addUnitReview(unitId, review) {
-    await supabase.from("unit_reviews").insert({ unit_id: unitId, user_id: user.id, ...review });
+    const { data } = await supabase.from("unit_reviews").insert({ unit_id: unitId, user_id: user.id, ...review }).select().single();
     await fetchHospitals();
+    return data?.id;
   }
   async function addHospitalReview(hospitalId, review) {
-    await supabase.from("hospital_reviews").insert({ hospital_id: hospitalId, user_id: user.id, ...review });
+    const { data } = await supabase.from("hospital_reviews").insert({ hospital_id: hospitalId, user_id: user.id, ...review }).select().single();
     await fetchHospitals();
+    return data?.id;
   }
   async function addClaim(unitId, claim) {
     await supabase.from("units").update(claim).eq("id", unitId);

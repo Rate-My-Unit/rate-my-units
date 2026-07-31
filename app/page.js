@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   ShieldCheck, MapPin, Smile, Building2, Wifi, Star, Stethoscope, PartyPopper,
   UtensilsCrossed, Users, Briefcase, Heart, DollarSign, ThumbsUp, ThumbsDown,
-  Search, Plus, ArrowLeft, ArrowLeftRight, Menu, X,
+  Search, Plus, ArrowLeft, ArrowLeftRight, Menu, X, Lock,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -326,6 +326,10 @@ function AuthPanel({ onClose }) {
             )}
             {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
             <PrimaryButton onClick={handleSubmit}>{submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</PrimaryButton>
+            <div className="flex items-center justify-center gap-1.5 pt-1">
+              <Lock size={13} color="#64809A" />
+              <span style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#64809A" }}>Secured by Supabase — passwords are never stored in readable form</span>
+            </div>
           </div>
         ))}
       </div>

@@ -361,7 +361,7 @@ function VerificationSubmittedModal({ onClose }) {
   );
 }
 
-function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitType, onOpenSignIn, embedded }) {
+function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitType, onOpenSignIn, embedded, submitLabel = "Submit proof" }) {
   const [status, setStatus] = useState("loading"); // "loading" | "none" | "pending" | "verified"
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -421,7 +421,7 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitTyp
           </p>
           <input type="file" accept="image/*,.pdf" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm mb-3" style={{ fontFamily: "'Inter'", color: "#33475A" }} />
           {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">{error}</p>}
-          {file && <PrimaryButton onClick={handleUpload} color="#0F9D6A">{uploading ? "Uploading…" : "Submit proof"}</PrimaryButton>}
+          {file && <PrimaryButton onClick={handleUpload} color="#0F9D6A">{uploading ? "Uploading…" : submitLabel}</PrimaryButton>}
         </div>
       )}
     </div>
@@ -1036,6 +1036,12 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
 
   return (
     <StaticPage title="Get Verified" onBack={onBack}>
+      <div className="flex items-center gap-2 rounded-xl px-3.5 py-3 mb-1" style={{ background: "#EAF3FB" }}>
+        <span style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>Here's what you'll get on your reports:</span>
+        <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'", fontWeight: 700, fontSize: "12px" }}>
+          <ShieldCheck size={13} /> Verified
+        </span>
+      </div>
       <p>A <strong>Verified</strong> badge tells other people your report is backed by real proof…not just a claim.</p>
       <p>Here's how it works: file a report on any hospital or unit, and right after you post it, you'll get the option to upload something showing you actually worked there! A badge photo, pay stub, or assignment letter.</p>
       <p>You can also get Verified by clicking "Get Verified" when looking at the menu options!</p>
@@ -1085,13 +1091,13 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
 
           {selectedHospital && (
             <div className="pt-1">
-              <HospitalVerifyPanel user={user} hospitalId={selectedHospital.id} hospitalName={selectedHospital.name} unitName={unitName} unitType={unitType} onOpenSignIn={onOpenSignIn} embedded />
+              <HospitalVerifyPanel user={user} hospitalId={selectedHospital.id} hospitalName={selectedHospital.name} unitName={unitName} unitType={unitType} onOpenSignIn={onOpenSignIn} embedded submitLabel="Submit Verification" />
             </div>
           )}
         </div>
       )}
 
-      <div className="pt-2"><PrimaryButton onClick={onGoBrowse} color="#64809A">Browse hospitals</PrimaryButton></div>
+      <div className="pt-3"><button onClick={onGoBrowse} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#64809A" }}>← Browse hospitals instead</button></div>
     </StaticPage>
   );
 }
@@ -1302,7 +1308,12 @@ function SideMenu({ open, onClose, onNavigate }) {
           <button onClick={onClose}><X size={20} color="#64809A" /></button>
         </div>
         <div className="flex flex-col gap-1">
-          {items.map((it) => <button key={it.key} onClick={() => onNavigate(it.key)} className="text-left px-3 py-3 rounded-xl" style={{ fontFamily: "'Inter'", fontWeight: 500, fontSize: "14.5px", color: "#16324A" }}>{it.label}</button>)}
+          {items.map((it) => (
+            <button key={it.key} onClick={() => onNavigate(it.key)} className="text-left px-3 py-3 rounded-xl flex items-center gap-2" style={{ fontFamily: "'Inter'", fontWeight: 500, fontSize: "14.5px", color: "#16324A" }}>
+              {it.label}
+              {it.key === "getVerified" && <ShieldCheck size={15} color="#0F9D6A" />}
+            </button>
+          ))}
         </div>
       </div>
     </div>

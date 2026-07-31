@@ -62,10 +62,10 @@ function containsProfanity(text) {
 
 const inputStyle = { borderColor: "#D7E6F3", fontFamily: "'Inter'", color: "#16324A" };
 
-function ScorePill({ score, size = "md" }) {
+function ScorePill({ score, size = "md", width }) {
   const dims = size === "lg" ? { px: "18px", py: "10px", font: "1.6rem", minWidth: "84px" } : size === "sm" ? { px: "8px", py: "3px", font: "0.8rem", minWidth: undefined } : { px: "12px", py: "6px", font: "1.05rem", minWidth: "68px" };
   return (
-    <span className="inline-flex items-center justify-center rounded-xl font-extrabold" style={{ background: scoreBg(score), color: scoreTextColor(score), padding: `${dims.py} ${dims.px}`, fontFamily: "'Poppins'", fontSize: dims.font, minWidth: dims.minWidth }}>
+    <span className="inline-flex items-center justify-center rounded-xl font-extrabold" style={{ background: scoreBg(score), color: scoreTextColor(score), padding: `${dims.py} ${dims.px}`, fontFamily: "'Poppins'", fontSize: dims.font, minWidth: dims.minWidth, width: width, boxSizing: "border-box" }}>
       {score ? score.toFixed(1) : "—"}
     </span>
   );
@@ -652,9 +652,9 @@ function CompareView({ type, base, hospitals, onBack }) {
       {target && (
         <div className="rounded-2xl p-5" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
           <div className="grid grid-cols-3 items-center pb-4 mb-1" style={{ borderBottom: "3px solid #16324A" }}>
-            <ScorePill score={baseScore} size="md" />
+            <div className="flex justify-start"><ScorePill score={baseScore} size="md" width="76px" /></div>
             <span className="text-center" style={{ fontFamily: "'Inter'", fontSize: "11px", fontWeight: 700, color: "#64809A" }}>OVERALL</span>
-            <div className="flex justify-end"><ScorePill score={targetScore} size="md" /></div>
+            <div className="flex justify-end"><ScorePill score={targetScore} size="md" width="76px" /></div>
           </div>
           {categories.map((c) => {
             const bv = avg(baseReviews, c.key);

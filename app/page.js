@@ -1475,8 +1475,8 @@ function AboutPage({ onBack }) {
   return (
     <StaticPage title="What's the goal?" onBack={onBack}>
       <p>Taking a hospital job is a big decision, and most people go in blind. Recruiters and hospital marketing tell you what the unit is like…but the people who actually know are the ones already working the floor.</p>
-      <p>Rate My Unit gives nurses, techs, and other staff a place to report what a specific unit is really like: staffing ratios, management, culture, and pay. The four things that can make or break a job. It also lets you rate the hospital as a whole, separately from units… on things like safety, reputation, facilities, food, etc.</p>
-      <p>The goal is simple: before you take your next big opportunity, you should be able to see what people who've actually worked there have to say.</p>
+      <p><strong>Rate My Unit</strong> gives nurses, techs, and other staff a place to report what a specific unit is really like: staffing ratios, management, culture, and pay. The four things that can make or break a job. It also lets you rate the hospital as a whole, separately from units… on things like safety, reputation, facilities, food, etc.</p>
+      <p><strong>The goal is simple:</strong> before you take your next big opportunity, you should be able to see what people who've actually worked there have to say.</p>
     </StaticPage>
   );
 }
@@ -1485,7 +1485,7 @@ function HelpPage({ onBack }) {
     ["How do I post a report?", "Sign in with your email at the top of the page, then open any unit or hospital and click \"File a report\" or \"Rate this hospital.\""],
     ["Is my identity shown?", "No. Your email is used only to sign you in and is never displayed on your review or shared with anyone, including the hospital."],
     ["What does \"Helpful?\" do?", "Thumbs up or down on any report to signal whether it was useful. You can sort reports by \"Most helpful\" to surface the best ones first."],
-    ["What does claiming a unit mean?", "Staff can claim their own unit to confirm details are accurate. Your verification info is never shared publicly or with your employer."],
+    ["What does \"Get Verified\" mean?", "Getting Verified helps people know you are a verified employee of a particular hospital. All verified accounts are always filtered to the top of reports to give the most accurate information."],
     ["Can I add a hospital or unit that's missing?", "Yes, use the \"Add a unit\" button in the header or the links on the search pages."],
   ];
   return (

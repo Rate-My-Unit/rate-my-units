@@ -1025,6 +1025,221 @@ function StaticPage({ title, onBack, children }) {
 }
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
+function IncomeCalculatorPage({ onBack }) {
+  const [date, setDate] = useState("");
+  const [hourlyRate, setHourlyRate] = useState("");
+  const [normalHours, setNormalHours] = useState("");
+  const [otRate, setOtRate] = useState("");
+  const [otHours, setOtHours] = useState("");
+  const [contractStipends, setContractStipends] = useState("");
+  const [stateAbbr, setStateAbbr] = useState("");
+  const [city, setCity] = useState("");
+  const [stateCities, setStateCities] = useState([]);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const [status, setStatus] = useState("idle"); // "idle" | "loading" | "found" | "notfound" | "error"
+  const [results, setResults] = useState(null);
+  const [manualGsaWeekly, setManualGsaWeekly] = useState("");
+
+  const year = date ? new Date(date).getFullYear() : new Date().getFullYear();
+  const monthNum = date ? new Date(date).getMonth() + 1 : new Date().getMonth() + 1;
+
+  useEffect(() => {
+    setStateCities([]);
+    setCity("");
+    if (!stateAbbr) return;
+    let cancelled = false;
+    setCitiesLoading(true);
+    const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
+    fetch(`https://api.gsa.gov/travel/perdiem/v2/rates/state/${stateAbbr}/year/${year}?api_key=${apiKey}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const names = new Set();
+        (data?.rates?.[0]?.rate || []).forEach((r) => { if (r.city) names.add(r.city); });
+        setStateCities(Array.from(names).sort());
+      })
+      .catch(() => { if (!cancelled) setStateCities([]); })
+      .finally(() => { if (!cancelled) setCitiesLoading(false); });
+    return () => { cancelled = true; };
+  }, [stateAbbr, year]);
+
+  const cityMatches = useMemo(() => {
+    if (!city.trim()) return stateCities.slice(0, 8);
+    const q = city.toLowerCase();
+    return stateCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8);
+  }, [city, stateCities]);
+
+  function computeTaxable() {
+    const hr = parseFloat(hourlyRate) || 0;
+    const nh = parseFloat(normalHours) || 0;
+    const or_ = parseFloat(otRate) || 0;
+    const oh = parseFloat(otHours) || 0;
+    return hr * nh + or_ * oh;
+  }
+
+  async function handleCalculate() {
+    const taxable = computeTaxable();
+    const contractStipendsNum = parseFloat(contractStipends) || 0;
+
+    if (!stateAbbr) {
+      setResults({ taxable, contractStipends: contractStipendsNum, contractTotal: taxable + contractStipendsNum, gsaWeekly: null });
+      setStatus("notfound");
+      return;
+    }
+
+    setStatus("loading");
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
+      const url = city.trim()
+        ? `https://api.gsa.gov/travel/perdiem/v2/rates/city/${encodeURIComponent(city.trim())}/state/${stateAbbr}/year/${year}?api_key=${apiKey}`
+        : `https://api.gsa.gov/travel/perdiem/v2/rates/state/${stateAbbr}/year/${year}?api_key=${apiKey}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const rateEntry = data?.rates?.[0]?.rate?.[0];
+      const monthEntry = rateEntry?.months?.month?.find((m) => Number(m.number) === monthNum);
+      const dailyLodging = monthEntry?.value;
+      const dailyMeals = rateEntry?.meals;
+
+      if (!dailyLodging || !dailyMeals) {
+        setResults({ taxable, contractStipends: contractStipendsNum, contractTotal: taxable + contractStipendsNum, gsaWeekly: null });
+        setStatus("notfound");
+        return;
+      }
+      const gsaWeekly = (dailyLodging + dailyMeals) * 7;
+      setResults({ taxable, contractStipends: contractStipendsNum, contractTotal: taxable + contractStipendsNum, gsaWeekly, gsaTotal: taxable + gsaWeekly });
+      setStatus("found");
+    } catch (e) {
+      setResults({ taxable, contractStipends: contractStipendsNum, contractTotal: taxable + contractStipendsNum, gsaWeekly: null });
+      setStatus("error");
+    }
+  }
+
+  function handleManualGsa() {
+    const g = parseFloat(manualGsaWeekly) || 0;
+    setResults((r) => ({ ...r, gsaWeekly: g, gsaTotal: r.taxable + g }));
+    setStatus("found");
+  }
+
+  return (
+    <StaticPage title="Income Calculator" onBack={onBack}>
+      <p>Compare what a contract's stipend actually offers against the GSA maximum allowable for that area. Enter your pay details and either the contract's weekly stipend, the location, or both.</p>
+
+      <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+        <p style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }} className="mb-3">Enter Your Details</p>
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Start Date</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded-xl px-3.5 py-2.5 text-sm mb-3" style={inputStyle} />
+
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Hourly Rate ($)</label>
+            <TextInput value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} placeholder="0.00" />
+          </div>
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Normal Hours</label>
+            <TextInput value={normalHours} onChange={(e) => setNormalHours(e.target.value)} placeholder="0" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Overtime Rate ($)</label>
+            <TextInput value={otRate} onChange={(e) => setOtRate(e.target.value)} placeholder="0.00" />
+          </div>
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Overtime Hours</label>
+            <TextInput value={otHours} onChange={(e) => setOtHours(e.target.value)} placeholder="0" />
+          </div>
+        </div>
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Contract Weekly Stipends ($)</label>
+        <TextInput value={contractStipends} onChange={(e) => setContractStipends(e.target.value)} placeholder="0.00" style={{ marginBottom: "12px" }} />
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>State</label>
+        <select value={stateAbbr} onChange={(e) => setStateAbbr(e.target.value)} className="w-full border rounded-xl px-3.5 py-2.5 text-sm mb-3" style={{ ...inputStyle, background: "#FFFFFF" }}>
+          <option value="">Select a state</option>
+          {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>City</label>
+        <div className="relative mb-1">
+          <input
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            onFocus={() => setShowCityDropdown(true)}
+            onBlur={() => setTimeout(() => setShowCityDropdown(false), 150)}
+            placeholder={stateAbbr ? "Search city…" : "Pick a state first"}
+            disabled={!stateAbbr}
+            className="w-full border rounded-xl px-3.5 py-2.5 text-sm"
+            style={{ ...inputStyle, background: stateAbbr ? "#FFFFFF" : "#F4F8FC" }}
+          />
+          {showCityDropdown && stateAbbr && cityMatches.length > 0 && (
+            <div className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden z-10" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF", maxHeight: "220px", overflowY: "auto" }}>
+              {cityMatches.map((c) => (
+                <button key={c} onMouseDown={() => { setCity(c); setShowCityDropdown(false); }} className="w-full text-left px-3.5 py-2" style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#16324A", borderTop: "1px solid #EEF4FA" }}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {stateAbbr && citiesLoading && <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-2">Loading cities for {stateAbbr}…</p>}
+
+        <div className="pt-2">
+          <PrimaryButton onClick={handleCalculate} color="#0F9D6A">{status === "loading" ? "Calculating…" : "Calculate"}</PrimaryButton>
+        </div>
+
+        {status === "notfound" && (
+          <div className="pt-3">
+            <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">
+              {stateAbbr ? "Couldn't find a GSA rate for that city. Enter it manually to compare, or check gsa.gov/perdiem:" : "Pick a state to compare against the GSA max, or just review your contract numbers below."}
+            </p>
+            {stateAbbr && (
+              <div className="flex gap-2 items-center">
+                <TextInput value={manualGsaWeekly} onChange={(e) => setManualGsaWeekly(e.target.value)} placeholder="GSA weekly stipend ($)" />
+                <PrimaryButton onClick={handleManualGsa} color="#64809A">Use this</PrimaryButton>
+              </div>
+            )}
+          </div>
+        )}
+        {status === "error" && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }} className="pt-2">Lookup failed — you can still compare using your contract numbers below.</p>}
+      </div>
+
+      {results && (
+        <div className="space-y-3 mt-2">
+          <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }} className="mb-2">Contract Says…</p>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid #EEF4FA", fontFamily: "'Inter'", fontSize: "14px", color: "#33475A" }}>
+              <span>Weekly Taxable</span><span style={{ fontWeight: 700 }}>${results.taxable.toFixed(0)}</span>
+            </div>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid #EEF4FA", fontFamily: "'Inter'", fontSize: "14px", color: "#33475A" }}>
+              <span>Weekly Stipends</span><span style={{ fontWeight: 700 }}>${results.contractStipends.toFixed(0)}</span>
+            </div>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid #EEF4FA", fontFamily: "'Poppins'", fontWeight: 800, color: "#16324A", fontSize: "1.05rem" }}>
+              <span>Weekly Total</span><span>${results.contractTotal.toFixed(0)}</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl p-4" style={{ background: "linear-gradient(135deg, #1B5E63, #2E8B92)" }}>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#FFFFFF" }} className="mb-2">GSA Max…</p>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid rgba(255,255,255,0.25)", fontFamily: "'Inter'", fontSize: "14px", color: "#D8ECEC" }}>
+              <span>Weekly Taxable</span><span style={{ fontWeight: 700, color: "#FFFFFF" }}>${results.taxable.toFixed(0)}</span>
+            </div>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid rgba(255,255,255,0.25)", fontFamily: "'Inter'", fontSize: "14px", color: "#D8ECEC" }}>
+              <span>Weekly Stipends</span><span style={{ fontWeight: 700, color: "#FFFFFF" }}>{results.gsaWeekly != null ? `$${results.gsaWeekly.toFixed(0)}` : "—"}</span>
+            </div>
+            <div className="flex justify-between py-2" style={{ borderTop: "1px solid rgba(255,255,255,0.25)", fontFamily: "'Poppins'", fontWeight: 800, color: "#FFFFFF", fontSize: "1.05rem" }}>
+              <span>Weekly Total</span><span>{results.gsaTotal != null ? `$${results.gsaTotal.toFixed(0)}` : "—"}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8", fontStyle: "italic" }} className="pt-2">This is a pay estimator, not tax or financial advice. Actual taxable vs. non-taxable treatment of stipends depends on your specific tax situation.</p>
+    </StaticPage>
+  );
+}
+
 function GsaCalculatorPage({ onBack }) {
   const [date, setDate] = useState("");
   const [stateAbbr, setStateAbbr] = useState("");
@@ -1451,6 +1666,7 @@ function SideMenu({ open, onClose, onNavigate }) {
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
     { key: "account", label: "My Account" }, { key: "getVerified", label: "Get Verified" },
     { key: "gsaCalculator", label: "GSA Calculator" },
+    { key: "incomeCalculator", label: "Income Calculator" },
     { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];
@@ -1703,6 +1919,7 @@ export default function App() {
 
         {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} />}
         {view.page === "gsaCalculator" && <GsaCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
+        {view.page === "incomeCalculator" && <IncomeCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}

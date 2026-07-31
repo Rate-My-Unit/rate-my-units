@@ -50,12 +50,22 @@ function scoreTextColor(score) {
   return "#7A1313";
 }
 
+const PROFANITY_LIST = [
+  "fuck", "shit", "bitch", "asshole", "bastard", "cunt", "dick", "piss", "cock",
+  "whore", "slut", "faggot", "retard", "nigger", "nigga", "twat", "wanker",
+  "motherfucker", "dumbass", "jackass", "douchebag", "prick", "pussy",
+];
+function containsProfanity(text) {
+  const lower = text.toLowerCase();
+  return PROFANITY_LIST.some((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
+}
+
 const inputStyle = { borderColor: "#D7E6F3", fontFamily: "'Inter'", color: "#16324A" };
 
 function ScorePill({ score, size = "md" }) {
-  const dims = size === "lg" ? { px: "18px", py: "10px", font: "1.6rem" } : size === "sm" ? { px: "8px", py: "3px", font: "0.8rem" } : { px: "12px", py: "6px", font: "1.05rem" };
+  const dims = size === "lg" ? { px: "18px", py: "10px", font: "1.6rem", minWidth: "84px" } : size === "sm" ? { px: "8px", py: "3px", font: "0.8rem", minWidth: undefined } : { px: "12px", py: "6px", font: "1.05rem", minWidth: "68px" };
   return (
-    <span className="inline-flex items-center justify-center rounded-xl font-extrabold" style={{ background: scoreBg(score), color: scoreTextColor(score), padding: `${dims.py} ${dims.px}`, fontFamily: "'Poppins'", fontSize: dims.font, minWidth: size === "lg" ? "84px" : undefined }}>
+    <span className="inline-flex items-center justify-center rounded-xl font-extrabold" style={{ background: scoreBg(score), color: scoreTextColor(score), padding: `${dims.py} ${dims.px}`, fontFamily: "'Poppins'", fontSize: dims.font, minWidth: dims.minWidth }}>
       {score ? score.toFixed(1) : "—"}
     </span>
   );
@@ -118,7 +128,9 @@ function HelpfulVote({ review, userVote, onVote }) {
     </div>
   );
 }
-function ReviewCard({ review, categories, userVote, onVote }) {
+function ReviewCard({ review, categories, userVote, onVote, currentUserId, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+  const isMine = currentUserId && review.user_id === currentUserId;
   return (
     <div className="py-4" style={{ borderTop: "1px solid #EEF4FA" }}>
       <div className="flex items-center justify-between mb-2">
@@ -140,7 +152,19 @@ function ReviewCard({ review, categories, userVote, onVote }) {
         ))}
       </div>
       <p style={{ fontFamily: "'Inter'", fontSize: "14.5px", lineHeight: 1.6, color: "#33475A" }}>{review.comment}</p>
-      <HelpfulVote review={review} userVote={userVote} onVote={onVote} />
+      <div className="flex items-center justify-between">
+        <HelpfulVote review={review} userVote={userVote} onVote={onVote} />
+        {isMine && !confirming && (
+          <button onClick={() => setConfirming(true)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+        )}
+        {isMine && confirming && (
+          <div className="flex items-center gap-2">
+            <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+            <button onClick={() => onDelete(review.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+            <button onClick={() => setConfirming(false)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -337,6 +361,10 @@ function ReviewForm({ categories, reviewType, onSubmit, onCancel, onDone, rolePl
       setError("Fill in your role, every rating, and a comment before submitting.");
       return;
     }
+    if (containsProfanity(comment) || containsProfanity(role)) {
+      setError("Please keep it respectful — remove any profanity before posting.");
+      return;
+    }
     setSubmitting(true);
     const id = await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
     setSubmitting(false);
@@ -360,7 +388,7 @@ function ReviewForm({ categories, reviewType, onSubmit, onCancel, onDone, rolePl
       <div className="rounded-2xl p-5 mt-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
         <div className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ fontFamily: "'Inter'", color: "#0F9D6A" }}>✓ Report posted</div>
         <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-3">
-          Want a <strong>Verified</strong> badge on your report? Upload something showing you worked there — a badge photo, pay stub, or assignment letter. It's reviewed privately and never shown publicly.
+          Want a <strong>Verified</strong> badge on your report? Upload something showing you worked there! A badge photo, pay stub, or assignment letter. It's reviewed privately and never shown publicly.
         </p>
         <input type="file" accept="image/*,.pdf" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm mb-3" style={{ fontFamily: "'Inter'", color: "#33475A" }} />
         <div className="flex gap-2">
@@ -374,6 +402,11 @@ function ReviewForm({ categories, reviewType, onSubmit, onCancel, onDone, rolePl
   return (
     <div className="rounded-2xl p-5 mt-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ fontFamily: "'Inter'", color: "#64809A" }}>File your report</div>
+      <div className="rounded-xl px-3.5 py-2.5 mb-4" style={{ background: "#FCE985" }}>
+        <p style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#5A4300", lineHeight: 1.5 }}>
+          Keep it respectful and anonymous — don't name any specific coworkers, managers, or patients, and no profanity. Accounts that don't follow this get banned.
+        </p>
+      </div>
       <div className="space-y-4">
         <div>
           <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Your role</label>
@@ -444,7 +477,9 @@ function ClaimForm({ onSubmit, onCancel, user, onOpenSignIn }) {
 }
 
 function AddUnitForm({ hospitals, onSubmit, onCancel, user, onOpenSignIn }) {
-  const [hospitalChoice, setHospitalChoice] = useState(hospitals[0]?.id || "new");
+  const [hospitalMode, setHospitalMode] = useState("search"); // "search" | "new"
+  const [query, setQuery] = useState("");
+  const [selectedHospital, setSelectedHospital] = useState(null);
   const [newHospitalName, setNewHospitalName] = useState("");
   const [newHospitalCity, setNewHospitalCity] = useState("");
   const [name, setName] = useState("");
@@ -454,14 +489,34 @@ function AddUnitForm({ hospitals, onSubmit, onCancel, user, onOpenSignIn }) {
 
   if (!user) return <SignInPrompt onOpenSignIn={onOpenSignIn} />;
 
+  const matches = useMemo(() => {
+    if (!query.trim() || selectedHospital) return [];
+    const q = query.toLowerCase();
+    return hospitals.filter((h) => h.name.toLowerCase().includes(q) || h.city.toLowerCase().includes(q)).slice(0, 6);
+  }, [query, hospitals, selectedHospital]);
+
   function handleSubmit() {
     if (!name.trim() || !type.trim()) { setError("Unit name and unit type are required."); return; }
-    if (hospitalChoice === "new" && (!newHospitalName.trim() || !newHospitalCity.trim())) { setError("Enter the hospital's name and city."); return; }
-    onSubmit({
-      hospitalId: hospitalChoice === "new" ? null : hospitalChoice,
-      newHospital: hospitalChoice === "new" ? { name: newHospitalName.trim(), city: newHospitalCity.trim() } : null,
-      unit: { name: name.trim(), floor: floor.trim() || "—", type: type.trim() },
-    });
+    if (hospitalMode === "search") {
+      if (!selectedHospital) { setError("Search for and select a hospital, or switch to add a new one."); return; }
+      onSubmit({
+        hospitalId: selectedHospital.id,
+        hospitalMeta: { id: selectedHospital.id, name: selectedHospital.name, city: selectedHospital.city },
+        newHospital: null,
+        unit: { name: name.trim(), floor: floor.trim() || "—", type: type.trim() },
+      });
+    } else {
+      if (!newHospitalName.trim() || !newHospitalCity.trim()) { setError("Enter the hospital's name and city."); return; }
+      const dup = hospitals.find((h) => h.name.trim().toLowerCase() === newHospitalName.trim().toLowerCase());
+      if (dup) { setError(`"${newHospitalName.trim()}" is already added — search for it instead.`); return; }
+      setError("");
+      onSubmit({
+        hospitalId: null,
+        hospitalMeta: null,
+        newHospital: { name: newHospitalName.trim(), city: newHospitalCity.trim() },
+        unit: { name: name.trim(), floor: floor.trim() || "—", type: type.trim() },
+      });
+    }
   }
 
   return (
@@ -470,17 +525,43 @@ function AddUnitForm({ hospitals, onSubmit, onCancel, user, onOpenSignIn }) {
       <div className="space-y-3">
         <div>
           <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Hospital</label>
-          <select value={hospitalChoice} onChange={(e) => setHospitalChoice(e.target.value)} className="w-full border rounded-xl px-3.5 py-2.5 text-sm" style={{ ...inputStyle, background: "#FFFFFF" }}>
-            {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name} — {h.city}</option>)}
-            <option value="new">+ Add a new hospital</option>
-          </select>
+
+          {hospitalMode === "new" ? (
+            <div className="space-y-2">
+              <button onClick={() => { setHospitalMode("search"); setNewHospitalName(""); setNewHospitalCity(""); setError(""); }} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>← Search for an existing hospital instead</button>
+              <div className="grid grid-cols-2 gap-3">
+                <TextInput value={newHospitalName} onChange={(e) => setNewHospitalName(e.target.value)} placeholder="Hospital name" />
+                <TextInput value={newHospitalCity} onChange={(e) => setNewHospitalCity(e.target.value)} placeholder="City, State" />
+              </div>
+            </div>
+          ) : selectedHospital ? (
+            <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5" style={{ border: "1px solid #D7E6F3", background: "#EAF3FB" }}>
+              <div>
+                <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{selectedHospital.name}</div>
+                <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{selectedHospital.city}</div>
+              </div>
+              <button onClick={() => setSelectedHospital(null)} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Change</button>
+            </div>
+          ) : (
+            <div>
+              <div className="flex gap-2">
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hospital name or city…" className="flex-1 border rounded-xl px-3.5 py-2.5 text-sm" style={inputStyle} />
+                <button onClick={() => { setHospitalMode("new"); setQuery(""); setError(""); }} className="px-3 rounded-xl text-[12.5px] font-semibold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F9D6A", border: "1px solid #0F9D6A" }}>+ New hospital</button>
+              </div>
+              {matches.length > 0 && (
+                <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid #D7E6F3" }}>
+                  {matches.map((h) => (
+                    <button key={h.id} onClick={() => { setSelectedHospital(h); setQuery(""); }} className="w-full text-left px-3.5 py-2.5" style={{ background: "#FFFFFF", borderTop: "1px solid #EEF4FA" }}>
+                      <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{h.name}</div>
+                      <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{h.city}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        {hospitalChoice === "new" && (
-          <div className="grid grid-cols-2 gap-3">
-            <TextInput value={newHospitalName} onChange={(e) => setNewHospitalName(e.target.value)} placeholder="Hospital name" />
-            <TextInput value={newHospitalCity} onChange={(e) => setNewHospitalCity(e.target.value)} placeholder="City, State" />
-          </div>
-        )}
+
         <div className="grid grid-cols-2 gap-3">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Unit name, e.g. Cardiac ICU" />
           <TextInput value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="Floor / wing (optional)" />
@@ -594,9 +675,8 @@ function CompareView({ type, base, hospitals, onBack }) {
   );
 }
 
-function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onClaim, onVote, userVotes, onCompare, user, onOpenSignIn }) {
-  const [showForm, setShowForm] = useState(false);
-  const [showClaim, setShowClaim] = useState(false);
+function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onVote, userVotes, onCompare, user, onOpenSignIn, autoOpenReview }) {
+  const [showForm, setShowForm] = useState(!!autoOpenReview);
   const [reviewSort, setReviewSort] = useState("newest");
 
   const reviews = unit.unit_reviews || [];
@@ -614,20 +694,19 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onCla
         <button onClick={onBackToHospital} className="text-[13px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>{hospital.name}</button>
       </div>
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-1" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Floor {unit.floor} · {unit.type}</div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.7rem", color: "#16324A" }}>{unit.name}</h1>
-        <ClaimBadge status={unit.claim_status} name={unit.claim_name} />
-      </div>
+      <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.7rem", color: "#16324A" }}>{unit.name}</h1>
       <div className="flex items-center justify-between mb-3 mt-1">
         <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#64809A" }}>{hospital.name} · {hospital.city}</p>
         <CompareButton onClick={onCompare} label="Compare" />
       </div>
 
-      {(!unit.claim_status || unit.claim_status === "unclaimed") && !showClaim && (
-        <button onClick={() => setShowClaim(true)} className="text-[12.5px] mb-4 font-semibold" style={{ fontFamily: "'Inter'", color: "#0F9D6A" }}>Are you staff here? Claim this unit</button>
-      )}
-      {showClaim && <ClaimForm user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowClaim(false)} onSubmit={(claim) => { onClaim(unit.id, claim); setShowClaim(false); }} />}
-      {(unit.claim_status || !showClaim) && <div className="mb-3" />}
+      <div className="rounded-xl px-3.5 py-3 mb-4 flex items-center justify-between gap-3" style={{ background: "#A9F0CE" }}>
+        <div className="flex items-center gap-2">
+          <ShieldCheck size={16} color="#0F5132" />
+          <span style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132", fontWeight: 500 }}>Worked here? File a report to get Verified.</span>
+        </div>
+        {!showForm && <button onClick={() => setShowForm(true)} className="text-[12.5px] font-bold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F5132" }}>Get Verified</button>}
+      </div>
 
       <VitalsPanel reviews={reviews} categories={UNIT_CATEGORIES} />
       <CategoryList reviews={reviews} categories={UNIT_CATEGORIES} />
@@ -644,13 +723,13 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onCla
 
       <div>
         {reviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No reports yet on this unit. Be the first to file one.</p>}
-        {sortedReviews.map((r) => <ReviewCard key={r.id} review={r} categories={UNIT_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("unit", id, dir)} />)}
+        {sortedReviews.map((r) => <ReviewCard key={r.id} review={r} categories={UNIT_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("unit", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("unit", id)} />)}
       </div>
     </div>
   );
 }
 
-function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onVote, userVotes, onCompare, onOpenAddUnit, user, onOpenSignIn }) {
+function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onOpenAddUnit, user, onOpenSignIn }) {
   const [tab, setTab] = useState("overview");
   const [sort, setSort] = useState("rating-desc");
   const [showForm, setShowForm] = useState(false);
@@ -707,7 +786,7 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onVote, use
           {showForm && <ReviewForm categories={HOSPITAL_CATEGORIES} reviewType="hospital" rolePlaceholder="e.g. RN, Emergency" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={(rev) => onAddReview(hospital.id, rev)} onDone={() => setShowForm(false)} />}
           <div>
             {hReviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No hospital-wide reports yet. Be the first to file one.</p>}
-            {sortedHospitalReviews.map((r) => <ReviewCard key={r.id} review={r} categories={HOSPITAL_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("hospital", id, dir)} />)}
+            {sortedHospitalReviews.map((r) => <ReviewCard key={r.id} review={r} categories={HOSPITAL_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("hospital", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("hospital", id)} />)}
           </div>
         </div>
       )}
@@ -732,7 +811,6 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onVote, use
                     <div className="text-[11px] uppercase tracking-widest font-semibold mb-0.5" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Floor {u.floor} · {u.type}</div>
                     <div className="flex items-center gap-2">
                       <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.02rem", color: "#16324A" }}>{u.name}</div>
-                      <ClaimBadge status={u.claim_status} name={u.claim_name} />
                     </div>
                     <div style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#64809A" }}>{(u.unit_reviews || []).length} report{(u.unit_reviews || []).length === 1 ? "" : "s"}</div>
                   </div>
@@ -804,7 +882,6 @@ function AllUnitsView({ hospitals, onSelectUnit, onOpenAddUnit }) {
                 <div className="text-[11px] uppercase tracking-widest font-semibold mb-0.5" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>{u.type} · Floor {u.floor}</div>
                 <div className="flex items-center gap-2">
                   <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.02rem", color: "#16324A" }}>{u.name}</div>
-                  <ClaimBadge status={u.claim_status} name={u.claim_name} />
                 </div>
                 <div style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#64809A" }}>{u.hospital.name} · {u.hospital.city}</div>
               </div>
@@ -872,6 +949,16 @@ function StaticPage({ title, onBack, children }) {
     </div>
   );
 }
+function GetVerifiedPage({ onBack, onGoBrowse }) {
+  return (
+    <StaticPage title="Get Verified" onBack={onBack}>
+      <p>A <strong>Verified</strong> badge tells other people your report is backed by real proof — not just a claim.</p>
+      <p>Here's how it works: file a report on any hospital or unit, and right after you post it, you'll get the option to upload something showing you actually worked there — a badge photo, pay stub, or assignment letter.</p>
+      <p>It's reviewed privately and never shown publicly — only the green Verified badge shows up on your report once it's approved.</p>
+      <PrimaryButton onClick={onGoBrowse}>Browse hospitals</PrimaryButton>
+    </StaticPage>
+  );
+}
 function AboutPage({ onBack }) {
   return (
     <StaticPage title="What's the goal?" onBack={onBack}>
@@ -898,19 +985,10 @@ function HelpPage({ onBack }) {
   );
 }
 function ContactPage({ onBack }) {
-  const [sent, setSent] = useState(false);
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [message, setMessage] = useState("");
   return (
     <StaticPage title="Contact us" onBack={onBack}>
-      <p>Questions, feedback, or something not working right? Send us a note.</p>
-      {sent ? <p style={{ color: "#0F5132", fontWeight: 600 }}>✓ Message received, thanks for the feedback!</p> : (
-        <div className="space-y-3 pt-2">
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-          <TextInput value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Your email" type="email" />
-          <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="What's on your mind?" className="w-full border rounded-xl px-3.5 py-2.5 text-sm" style={inputStyle} />
-          <PrimaryButton onClick={() => setSent(true)} color="#0F9D6A">Send message</PrimaryButton>
-        </div>
-      )}
+      <p>Questions, feedback, or something not working right? Reach us directly at:</p>
+      <a href="mailto:support@ratemyunit.org" className="inline-block" style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.05rem", color: "#3E8EDE" }}>support@ratemyunit.org</a>
     </StaticPage>
   );
 }
@@ -960,10 +1038,11 @@ function ChangePasswordForm() {
   );
 }
 
-function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit }) {
+function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview }) {
   const [myHospitalReviews, setMyHospitalReviews] = useState([]);
   const [myUnitReviews, setMyUnitReviews] = useState([]);
   const [loadingMine, setLoadingMine] = useState(true);
+  const [confirmingId, setConfirmingId] = useState(null);
 
   useEffect(() => {
     if (!user) { setLoadingMine(false); return; }
@@ -985,6 +1064,13 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit })
     }
     load();
   }, [user]);
+
+  async function handleDelete(reviewType, reviewId) {
+    await onDeleteReview(reviewType, reviewId);
+    if (reviewType === "hospital") setMyHospitalReviews((prev) => prev.filter((r) => r.id !== reviewId));
+    else setMyUnitReviews((prev) => prev.filter((r) => r.id !== reviewId));
+    setConfirmingId(null);
+  }
 
   if (!user) {
     return (
@@ -1009,11 +1095,24 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit })
             {myHospitalReviews.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't rated any hospitals yet.</p>}
             <div className="space-y-2">
               {myHospitalReviews.map((r) => (
-                <button key={r.id} onClick={() => onGoToHospital(r.hospitals)} className="w-full text-left rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
-                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.hospitals?.name}</div>
-                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.hospitals?.city} · {(r.created_at || "").slice(0, 10)}</div>
-                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
-                </button>
+                <div key={r.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                  <button onClick={() => onGoToHospital(r.hospitals)} className="w-full text-left">
+                    <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.hospitals?.name}</div>
+                    <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.hospitals?.city} · {(r.created_at || "").slice(0, 10)}</div>
+                    <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                  </button>
+                  <div className="pt-2 flex justify-end">
+                    {confirmingId === r.id ? (
+                      <div className="flex items-center gap-2">
+                        <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+                        <button onClick={() => handleDelete("hospital", r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                        <button onClick={() => setConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -1023,11 +1122,24 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit })
             {myUnitReviews.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't rated any units yet.</p>}
             <div className="space-y-2">
               {myUnitReviews.map((r) => (
-                <button key={r.id} onClick={() => onGoToUnit(r.units?.hospitals, r.units)} className="w-full text-left rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
-                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.units?.name}</div>
-                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.units?.hospitals?.name} · {(r.created_at || "").slice(0, 10)}</div>
-                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
-                </button>
+                <div key={r.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                  <button onClick={() => onGoToUnit(r.units?.hospitals, r.units)} className="w-full text-left">
+                    <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r.units?.name}</div>
+                    <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r.units?.hospitals?.name} · {(r.created_at || "").slice(0, 10)}</div>
+                    <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                  </button>
+                  <div className="pt-2 flex justify-end">
+                    {confirmingId === r.id ? (
+                      <div className="flex items-center gap-2">
+                        <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+                        <button onClick={() => handleDelete("unit", r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                        <button onClick={() => setConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -1040,7 +1152,8 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit })
 function SideMenu({ open, onClose, onNavigate }) {
   const items = [
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
-    { key: "account", label: "My Account" }, { key: "about", label: "What's the goal?" },
+    { key: "account", label: "My Account" }, { key: "getVerified", label: "Get Verified" },
+    { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];
   if (!open) return null;
@@ -1140,18 +1253,22 @@ export default function App() {
     await fetchHospitals();
     return data?.id;
   }
-  async function addClaim(unitId, claim) {
-    await supabase.from("units").update(claim).eq("id", unitId);
+  async function deleteReview(reviewType, reviewId) {
+    const table = reviewType === "hospital" ? "hospital_reviews" : "unit_reviews";
+    await supabase.from(table).delete().eq("id", reviewId);
     await fetchHospitals();
   }
   async function addUnit(payload) {
+    let hospitalMeta = payload.hospitalMeta;
     let hospitalId = payload.hospitalId;
     if (!hospitalId) {
       const { data: newH } = await supabase.from("hospitals").insert(payload.newHospital).select().single();
       hospitalId = newH.id;
+      hospitalMeta = { id: newH.id, name: newH.name, city: newH.city };
     }
-    await supabase.from("units").insert({ hospital_id: hospitalId, ...payload.unit });
+    const { data: newUnit } = await supabase.from("units").insert({ hospital_id: hospitalId, ...payload.unit }).select().single();
     await fetchHospitals();
+    return { hospital: hospitalMeta, unit: newUnit };
   }
   async function castVote(reviewType, reviewId, dir) {
     if (!user) { setSignInOpen(true); return; }
@@ -1223,6 +1340,7 @@ export default function App() {
             onBack={() => setView({ page: "home" })}
             onSelectUnit={(u) => setView({ page: "unit", hospital: view.hospital, unit: u, from: view })}
             onAddReview={addHospitalReview}
+            onDeleteReview={deleteReview}
             onVote={castVote}
             userVotes={userVotes}
             onCompare={() => setView({ page: "compare", type: "hospital", base: hospitals.find((h) => h.id === view.hospital.id), from: view })}
@@ -1239,11 +1357,12 @@ export default function App() {
             onBack={() => setView(view.from || { page: "hospital", hospital: view.hospital })}
             onBackToHospital={() => setView({ page: "hospital", hospital: view.hospital })}
             onAddReview={addUnitReview}
-            onClaim={addClaim}
+            onDeleteReview={deleteReview}
             onVote={castVote}
             userVotes={userVotes}
             user={user}
             onOpenSignIn={() => setSignInOpen(true)}
+            autoOpenReview={view.autoOpenReview}
             onCompare={() => setView({
               page: "compare", type: "unit",
               base: { ...hospitals.find((h) => h.id === view.hospital.id).units.find((u) => u.id === view.unit.id), hospitalName: view.hospital.name, hospitalCity: view.hospital.city },
@@ -1258,10 +1377,14 @@ export default function App() {
           <div>
             <button onClick={() => setView(view.from || { page: "home" })} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
             <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.5rem", color: "#16324A" }} className="mb-4">Add a unit</h1>
-            <AddUnitForm hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} onCancel={() => setView(view.from || { page: "home" })} onSubmit={async (payload) => { await addUnit(payload); setView({ page: "allUnits" }); }} />
+            <AddUnitForm hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} onCancel={() => setView(view.from || { page: "home" })} onSubmit={async (payload) => {
+              const result = await addUnit(payload);
+              setView({ page: "unit", hospital: result.hospital, unit: result.unit, autoOpenReview: true });
+            }} />
           </div>
         )}
 
+        {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} />}
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}
@@ -1272,6 +1395,7 @@ export default function App() {
             onOpenSignIn={() => setSignInOpen(true)}
             onGoToHospital={(h) => setView({ page: "hospital", hospital: h })}
             onGoToUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: { page: "account" } })}
+            onDeleteReview={deleteReview}
           />
         )}
       </main>

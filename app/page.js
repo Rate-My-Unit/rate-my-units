@@ -343,10 +343,30 @@ function SignInPrompt({ onOpenSignIn }) {
   );
 }
 
-function HospitalVerifyPanel({ user, hospitalId, hospitalName, onOpenSignIn, embedded }) {
+function VerificationSubmittedModal({ onClose }) {
+  return (
+    <div className="fixed inset-0" style={{ zIndex: 70 }}>
+      <div className="absolute inset-0" style={{ background: "rgba(22,50,74,0.45)" }} />
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm rounded-2xl p-5" style={{ background: "#FFFFFF" }}>
+        <div className="flex items-center gap-2 mb-3">
+          <ShieldCheck size={20} color="#0F9D6A" />
+          <span style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>Verification received!</span>
+        </div>
+        <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A", lineHeight: 1.6 }} className="mb-4">
+          Our team is currently reviewing your information to make sure everything looks good on our end. This process usually takes a few business days. In the meantime, feel free to post! We will automatically update your account and post with a verified symbol for the specific hospital once you're approved!
+        </p>
+        <PrimaryButton onClick={onClose} color="#0F9D6A">OK</PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitType, onOpenSignIn, embedded }) {
   const [status, setStatus] = useState("loading"); // "loading" | "none" | "pending" | "verified"
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [showSubmitted, setShowSubmitted] = useState(false);
 
   useEffect(() => {
     if (!user || !hospitalId) { setStatus("none"); return; }
@@ -358,14 +378,26 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, onOpenSignIn, emb
 
   async function handleUpload() {
     if (!file) return;
+    setError("");
     setUploading(true);
     const path = `${user.id}/${hospitalId}-${Date.now()}-${file.name}`;
     const { error: upErr } = await supabase.storage.from("verification-proof").upload(path, file);
-    if (!upErr) {
-      await supabase.from("hospital_verifications").insert({ user_id: user.id, hospital_id: hospitalId, file_path: path });
-      setStatus("pending");
+    if (upErr) {
+      setError(`Upload failed: ${upErr.message}`);
+      setUploading(false);
+      return;
     }
+    const { error: insErr } = await supabase.from("hospital_verifications").insert({
+      user_id: user.id,
+      hospital_id: hospitalId,
+      file_path: path,
+      unit_name: unitName || null,
+      unit_type: unitType || null,
+    });
     setUploading(false);
+    if (insErr) { setError(`Something went wrong saving your request: ${insErr.message}`); return; }
+    setStatus("pending");
+    setShowSubmitted(true);
   }
 
   if (!user) return <SignInPrompt onOpenSignIn={onOpenSignIn} />;
@@ -373,6 +405,7 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, onOpenSignIn, emb
 
   return (
     <div className={embedded ? "" : "rounded-2xl p-5"} style={embedded ? {} : { border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+      {showSubmitted && <VerificationSubmittedModal onClose={() => setShowSubmitted(false)} />}
       {status === "verified" && (
         <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#0F5132", fontWeight: 600 }} className="flex items-center gap-1.5">
           <ShieldCheck size={16} /> You're Verified for {hospitalName} — every report you post here shows the badge.
@@ -387,6 +420,7 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, onOpenSignIn, emb
             Upload something showing you worked at {hospitalName}! A badge photo, pay stub, or assignment letter. It's reviewed privately and never shown publicly.
           </p>
           <input type="file" accept="image/*,.pdf" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm mb-3" style={{ fontFamily: "'Inter'", color: "#33475A" }} />
+          {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">{error}</p>}
           {file && <PrimaryButton onClick={handleUpload} color="#0F9D6A">{uploading ? "Uploading…" : "Submit proof"}</PrimaryButton>}
         </div>
       )}
@@ -576,7 +610,7 @@ function AddUnitForm({ hospitals, onSubmit, onCancel, user, onOpenSignIn }) {
             <div>
               <div className="flex gap-2">
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hospital name or city…" className="flex-1 border rounded-xl px-3.5 py-2.5 text-sm" style={inputStyle} />
-                <button onClick={() => { setHospitalMode("new"); setQuery(""); setError(""); }} className="px-3 rounded-xl text-[12.5px] font-semibold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F9D6A", border: "1px solid #0F9D6A" }}>+ New hospital</button>
+                <button onClick={() => { setHospitalMode("new"); setNewHospitalName(query.trim()); setQuery(""); setError(""); }} className="px-3 rounded-xl text-[12.5px] font-semibold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F9D6A", border: "1px solid #0F9D6A" }}>+ New hospital</button>
               </div>
               {matches.length > 0 && (
                 <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid #D7E6F3" }}>
@@ -705,9 +739,8 @@ function CompareView({ type, base, hospitals, onBack }) {
   );
 }
 
-function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onVote, userVotes, onCompare, user, onOpenSignIn, autoOpenReview }) {
+function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onGetVerified, user, onOpenSignIn, autoOpenReview }) {
   const [showForm, setShowForm] = useState(!!autoOpenReview);
-  const [showVerify, setShowVerify] = useState(false);
   const [reviewSort, setReviewSort] = useState("newest");
 
   const reviews = unit.unit_reviews || [];
@@ -732,15 +765,12 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
         <CompareButton onClick={onCompare} label="Compare" />
       </div>
 
-      <div className="rounded-xl px-3.5 py-3 mb-4" style={{ background: "#A9F0CE" }}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={16} color="#0F5132" />
-            <span style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132", fontWeight: 500 }}>Worked here?</span>
-          </div>
-          {!showVerify && <button onClick={() => setShowVerify(true)} className="text-[12.5px] font-bold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F5132" }}>Get Verified</button>}
+      <div className="rounded-xl px-3.5 py-3 mb-4 flex items-center justify-between gap-3" style={{ background: "#A9F0CE" }}>
+        <div className="flex items-center gap-2">
+          <ShieldCheck size={16} color="#0F5132" />
+          <span style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132", fontWeight: 500 }}>Worked here?</span>
         </div>
-        {showVerify && <div className="pt-2"><HospitalVerifyPanel user={user} hospitalId={hospital.id} hospitalName={hospital.name} onOpenSignIn={onOpenSignIn} embedded /></div>}
+        <button onClick={() => onGetVerified(hospital)} className="text-[12.5px] font-bold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F5132" }}>Get Verified</button>
       </div>
 
       <VitalsPanel reviews={reviews} categories={UNIT_CATEGORIES} />
@@ -764,11 +794,10 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
   );
 }
 
-function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onOpenAddUnit, user, onOpenSignIn }) {
+function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onOpenAddUnit, onGetVerified, user, onOpenSignIn }) {
   const [tab, setTab] = useState("overview");
   const [sort, setSort] = useState("rating-desc");
   const [showForm, setShowForm] = useState(false);
-  const [showVerify, setShowVerify] = useState(false);
   const [reviewSort, setReviewSort] = useState("newest");
 
   const units = hospital.units || [];
@@ -811,15 +840,12 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteRev
 
       {tab === "overview" && (
         <div>
-          <div className="rounded-xl px-3.5 py-3 mb-4" style={{ background: "#A9F0CE" }}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={16} color="#0F5132" />
-                <span style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132", fontWeight: 500 }}>Worked here?</span>
-              </div>
-              {!showVerify && <button onClick={() => setShowVerify(true)} className="text-[12.5px] font-bold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F5132" }}>Get Verified</button>}
+          <div className="rounded-xl px-3.5 py-3 mb-4 flex items-center justify-between gap-3" style={{ background: "#A9F0CE" }}>
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={16} color="#0F5132" />
+              <span style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#0F5132", fontWeight: 500 }}>Worked here?</span>
             </div>
-            {showVerify && <div className="pt-2"><HospitalVerifyPanel user={user} hospitalId={hospital.id} hospitalName={hospital.name} onOpenSignIn={onOpenSignIn} embedded /></div>}
+            <button onClick={() => onGetVerified(hospital)} className="text-[12.5px] font-bold flex-shrink-0" style={{ fontFamily: "'Inter'", color: "#0F5132" }}>Get Verified</button>
           </div>
           <VitalsPanel reviews={hReviews} categories={HOSPITAL_CATEGORIES} />
           <CategoryList reviews={hReviews} categories={HOSPITAL_CATEGORIES} />
@@ -996,9 +1022,11 @@ function StaticPage({ title, onBack, children }) {
     </div>
   );
 }
-function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn }) {
+function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, prefillHospital }) {
   const [query, setQuery] = useState("");
-  const [selectedHospital, setSelectedHospital] = useState(null);
+  const [selectedHospital, setSelectedHospital] = useState(prefillHospital || null);
+  const [unitName, setUnitName] = useState("");
+  const [unitType, setUnitType] = useState("");
 
   const matches = useMemo(() => {
     if (!query.trim() || selectedHospital) return [];
@@ -1016,32 +1044,48 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn }) 
       {!user ? (
         <PrimaryButton onClick={onOpenSignIn}>Sign in to get started</PrimaryButton>
       ) : (
-        <div className="pt-2">
-          <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Verify a hospital</p>
-          {selectedHospital ? (
-            <div>
-              <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5 mb-3" style={{ border: "1px solid #D7E6F3", background: "#EAF3FB" }}>
+        <div className="pt-2 space-y-3">
+          <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-1">Verify a hospital</p>
+
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Hospital</label>
+            {selectedHospital ? (
+              <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5" style={{ border: "1px solid #D7E6F3", background: "#EAF3FB" }}>
                 <div>
                   <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{selectedHospital.name}</div>
                   <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{selectedHospital.city}</div>
                 </div>
-                <button onClick={() => setSelectedHospital(null)} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Change</button>
+                <button onClick={() => setSelectedHospital(null)} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Delete</button>
               </div>
-              <HospitalVerifyPanel user={user} hospitalId={selectedHospital.id} hospitalName={selectedHospital.name} onOpenSignIn={onOpenSignIn} embedded />
-            </div>
-          ) : (
-            <div>
-              <TextInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hospital name or city…" />
-              {matches.length > 0 && (
-                <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid #D7E6F3" }}>
-                  {matches.map((h) => (
-                    <button key={h.id} onClick={() => { setSelectedHospital(h); setQuery(""); }} className="w-full text-left px-3.5 py-2.5" style={{ background: "#FFFFFF", borderTop: "1px solid #EEF4FA" }}>
-                      <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{h.name}</div>
-                      <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{h.city}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
+            ) : (
+              <div>
+                <TextInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type your hospital's name…" />
+                {matches.length > 0 && (
+                  <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid #D7E6F3" }}>
+                    {matches.map((h) => (
+                      <button key={h.id} onClick={() => { setSelectedHospital(h); setQuery(""); }} className="w-full text-left px-3.5 py-2.5" style={{ background: "#FFFFFF", borderTop: "1px solid #EEF4FA" }}>
+                        <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{h.name}</div>
+                        <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>{h.city}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Unit name</label>
+            <TextInput value={unitName} onChange={(e) => setUnitName(e.target.value)} placeholder="e.g. Medical ICU" />
+          </div>
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Unit type</label>
+            <TextInput value={unitType} onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. ICU, Med-Surg, Emergency" />
+          </div>
+
+          {selectedHospital && (
+            <div className="pt-1">
+              <HospitalVerifyPanel user={user} hospitalId={selectedHospital.id} hospitalName={selectedHospital.name} unitName={unitName} unitType={unitType} onOpenSignIn={onOpenSignIn} embedded />
             </div>
           )}
         </div>
@@ -1449,6 +1493,7 @@ export default function App() {
             userVotes={userVotes}
             onCompare={() => setView({ page: "compare", type: "hospital", base: hospitals.find((h) => h.id === view.hospital.id), from: view })}
             onOpenAddUnit={() => setView({ page: "addUnit", from: view })}
+            onGetVerified={(h) => setView({ page: "getVerified", prefillHospital: h, from: view })}
             user={user}
             onOpenSignIn={() => setSignInOpen(true)}
           />
@@ -1467,6 +1512,7 @@ export default function App() {
             user={user}
             onOpenSignIn={() => setSignInOpen(true)}
             autoOpenReview={view.autoOpenReview}
+            onGetVerified={(h) => setView({ page: "getVerified", prefillHospital: h, from: view })}
             onCompare={() => setView({
               page: "compare", type: "unit",
               base: { ...hospitals.find((h) => h.id === view.hospital.id).units.find((u) => u.id === view.unit.id), hospitalName: view.hospital.name, hospitalCity: view.hospital.city },
@@ -1488,7 +1534,7 @@ export default function App() {
           </div>
         )}
 
-        {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} />}
+        {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} />}
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}

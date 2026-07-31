@@ -326,10 +326,6 @@ function AuthPanel({ onClose }) {
             )}
             {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
             <PrimaryButton onClick={handleSubmit}>{submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</PrimaryButton>
-            <div className="flex items-center justify-center gap-1.5 pt-1">
-              <Lock size={13} color="#64809A" />
-              <span style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#64809A" }}>Secured by Supabase — passwords are never stored in readable form</span>
-            </div>
           </div>
         ))}
       </div>
@@ -1557,6 +1553,8 @@ function ChangePasswordForm() {
 function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview }) {
   const [myHospitalReviews, setMyHospitalReviews] = useState([]);
   const [myUnitReviews, setMyUnitReviews] = useState([]);
+  const [likedReports, setLikedReports] = useState([]);
+  const [dislikedReports, setDislikedReports] = useState([]);
   const [loadingMine, setLoadingMine] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
 
@@ -1576,6 +1574,29 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
         .order("created_at", { ascending: false });
       setMyHospitalReviews(hData || []);
       setMyUnitReviews(uData || []);
+
+      const { data: votes } = await supabase
+        .from("review_votes")
+        .select("review_id, review_type, vote")
+        .eq("user_id", user.id);
+      const hospitalIds = (votes || []).filter((v) => v.review_type === "hospital").map((v) => v.review_id);
+      const unitIds = (votes || []).filter((v) => v.review_type === "unit").map((v) => v.review_id);
+      const voteMap = Object.fromEntries((votes || []).map((v) => [v.review_id, v.vote]));
+
+      let votedHospitalReviews = [];
+      let votedUnitReviews = [];
+      if (hospitalIds.length) {
+        const { data } = await supabase.from("hospital_reviews").select("*, hospitals(id, name, city)").in("id", hospitalIds);
+        votedHospitalReviews = (data || []).map((r) => ({ ...r, _type: "hospital" }));
+      }
+      if (unitIds.length) {
+        const { data } = await supabase.from("unit_reviews").select("*, units(id, name, floor, type, hospital_id, hospitals(id, name, city))").in("id", unitIds);
+        votedUnitReviews = (data || []).map((r) => ({ ...r, _type: "unit" }));
+      }
+      const allVoted = [...votedHospitalReviews, ...votedUnitReviews];
+      setLikedReports(allVoted.filter((r) => voteMap[r.id] === "up"));
+      setDislikedReports(allVoted.filter((r) => voteMap[r.id] === "down"));
+
       setLoadingMine(false);
     }
     load();
@@ -1656,6 +1677,44 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
                     )}
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4">
+            <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Liked reports ({likedReports.length})</h2>
+            {likedReports.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't liked any reports yet.</p>}
+            <div className="space-y-2">
+              {likedReports.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => r._type === "hospital" ? onGoToHospital(r.hospitals) : onGoToUnit(r.units?.hospitals, r.units)}
+                  className="w-full text-left rounded-xl p-3"
+                  style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}
+                >
+                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r._type === "hospital" ? r.hospitals?.name : r.units?.name}</div>
+                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r._type === "hospital" ? r.hospitals?.city : r.units?.hospitals?.name} · {(r.created_at || "").slice(0, 10)}</div>
+                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4">
+            <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Disliked reports ({dislikedReports.length})</h2>
+            {dislikedReports.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't disliked any reports yet.</p>}
+            <div className="space-y-2">
+              {dislikedReports.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => r._type === "hospital" ? onGoToHospital(r.hospitals) : onGoToUnit(r.units?.hospitals, r.units)}
+                  className="w-full text-left rounded-xl p-3"
+                  style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}
+                >
+                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{r._type === "hospital" ? r.hospitals?.name : r.units?.name}</div>
+                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{r._type === "hospital" ? r.hospitals?.city : r.units?.hospitals?.name} · {(r.created_at || "").slice(0, 10)}</div>
+                  <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>{r.comment}</p>
+                </button>
               ))}
             </div>
           </div>

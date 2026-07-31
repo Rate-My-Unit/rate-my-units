@@ -684,6 +684,7 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
     const arr = [...reviews];
     if (reviewSort === "helpful") arr.sort((a, b) => helpfulScore(b) - helpfulScore(a));
     else arr.reverse();
+    arr.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
     return arr;
   }, [reviews, reviewSort]);
 
@@ -751,6 +752,7 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteRev
     const arr = [...hReviews];
     if (reviewSort === "helpful") arr.sort((a, b) => helpfulScore(b) - helpfulScore(a));
     else arr.reverse();
+    arr.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
     return arr;
   }, [hReviews, reviewSort]);
 
@@ -952,9 +954,10 @@ function StaticPage({ title, onBack, children }) {
 function GetVerifiedPage({ onBack, onGoBrowse }) {
   return (
     <StaticPage title="Get Verified" onBack={onBack}>
-      <p>A <strong>Verified</strong> badge tells other people your report is backed by real proof — not just a claim.</p>
-      <p>Here's how it works: file a report on any hospital or unit, and right after you post it, you'll get the option to upload something showing you actually worked there — a badge photo, pay stub, or assignment letter.</p>
-      <p>It's reviewed privately and never shown publicly — only the green Verified badge shows up on your report once it's approved.</p>
+      <p>A <strong>Verified</strong> badge tells other people your report is backed by real proof…not just a claim.</p>
+      <p>Here's how it works: file a report on any hospital or unit, and right after you post it, you'll get the option to upload something showing you actually worked there! A badge photo, pay stub, or assignment letter.</p>
+      <p>You can also get Verified by clicking "Get Verified" when looking at the menu options!</p>
+      <p>It's reviewed privately and never shown publicly, only the green Verified badge shows up on your report once it's approved. After approval all verified reports are always filtered to the top to give us the most accurate data for that page.</p>
       <PrimaryButton onClick={onGoBrowse}>Browse hospitals</PrimaryButton>
     </StaticPage>
   );

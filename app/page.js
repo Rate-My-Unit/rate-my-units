@@ -1023,6 +1023,129 @@ function StaticPage({ title, onBack, children }) {
     </div>
   );
 }
+const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
+
+function GsaCalculatorPage({ onBack }) {
+  const [city, setCity] = useState("");
+  const [stateAbbr, setStateAbbr] = useState("");
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [lookupStatus, setLookupStatus] = useState("idle"); // "idle" | "loading" | "found" | "notfound" | "error"
+
+  const [lodgingRate, setLodgingRate] = useState("");
+  const [mieRate, setMieRate] = useState("");
+  const [nights, setNights] = useState("");
+  const [result, setResult] = useState(null);
+
+  async function handleLookup() {
+    if (!city.trim() || !stateAbbr) return;
+    setLookupStatus("loading");
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
+      const url = `https://api.gsa.gov/travel/perdiem/v2/rates/city/${encodeURIComponent(city.trim())}/state/${stateAbbr}/year/${year}?api_key=${apiKey}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const rateEntry = data?.rates?.[0]?.rate?.[0];
+      if (!rateEntry) { setLookupStatus("notfound"); return; }
+
+      let foundLodging = null;
+      const monthNow = new Date().getMonth(); // 0-11
+      const monthAbbrs = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      if (Array.isArray(rateEntry.months?.month)) {
+        const m = rateEntry.months.month.find((x) => Number(x.number) === monthNow + 1) || rateEntry.months.month[0];
+        if (m?.value) foundLodging = m.value;
+      } else if (rateEntry[monthAbbrs[monthNow]]) {
+        foundLodging = rateEntry[monthAbbrs[monthNow]];
+      }
+      const foundMie = rateEntry.meals;
+
+      if (foundLodging || foundMie) {
+        if (foundLodging) setLodgingRate(String(foundLodging));
+        if (foundMie) setMieRate(String(foundMie));
+        setLookupStatus("found");
+      } else {
+        setLookupStatus("notfound");
+      }
+    } catch (e) {
+      setLookupStatus("error");
+    }
+  }
+
+  function handleCalculate() {
+    const lodging = parseFloat(lodgingRate) || 0;
+    const mie = parseFloat(mieRate) || 0;
+    const n = parseInt(nights, 10) || 0;
+    if (n <= 0) return;
+    const days = n + 1; // standard: nights + 1 travel days
+    const lodgingTotal = lodging * n;
+    let mieTotal;
+    if (days <= 1) {
+      mieTotal = mie * 0.75;
+    } else {
+      const fullMieDays = days - 2;
+      mieTotal = fullMieDays * mie + 2 * (mie * 0.75);
+    }
+    setResult({ lodgingTotal, mieTotal, total: lodgingTotal + mieTotal, days, nights: n });
+  }
+
+  return (
+    <StaticPage title="Per Diem Calculator" onBack={onBack}>
+      <p>Estimate GSA per diem (lodging + meals &amp; incidentals) for a trip. These are official federal reimbursement rates — many travel contracts use them as a reference, but your actual pay package depends on your employer or agency.</p>
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8", fontStyle: "italic" }}>This is a rate estimator, not tax or financial advice.</p>
+
+      <div className="pt-2">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Look up official rate (optional)</p>
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <TextInput value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
+          <select value={stateAbbr} onChange={(e) => setStateAbbr(e.target.value)} className="border rounded-xl px-3.5 py-2.5 text-sm" style={{ ...inputStyle, background: "#FFFFFF" }}>
+            <option value="">State</option>
+            {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="flex gap-2 items-center mb-2">
+          <TextInput value={year} onChange={(e) => setYear(e.target.value)} placeholder="Year" style={{ maxWidth: "100px" }} />
+          <PrimaryButton onClick={handleLookup}>{lookupStatus === "loading" ? "Looking up…" : "Look up rate"}</PrimaryButton>
+        </div>
+        {lookupStatus === "found" && <p style={{ color: "#0F5132", fontSize: "12.5px", fontFamily: "'Inter'" }}>✓ Found it — filled in below. Double-check against gsa.gov/perdiem if it looks off.</p>}
+        {lookupStatus === "notfound" && <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }}>Couldn't find that exact city. Try the nearest larger city, or look it up at gsa.gov/perdiem and enter the rates manually below.</p>}
+        {lookupStatus === "error" && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>Lookup failed — enter rates manually below instead.</p>}
+      </div>
+
+      <div className="pt-3">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Calculate your trip</p>
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Lodging rate / night</label>
+            <TextInput value={lodgingRate} onChange={(e) => setLodgingRate(e.target.value)} placeholder="$" />
+          </div>
+          <div>
+            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>M&IE rate / day</label>
+            <TextInput value={mieRate} onChange={(e) => setMieRate(e.target.value)} placeholder="$" />
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Number of nights</label>
+          <TextInput value={nights} onChange={(e) => setNights(e.target.value)} placeholder="e.g. 13" />
+        </div>
+        <PrimaryButton onClick={handleCalculate} color="#0F9D6A">Calculate</PrimaryButton>
+      </div>
+
+      {result && (
+        <div className="rounded-2xl p-4 mt-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+          <div className="flex justify-between text-[13.5px] mb-1" style={{ fontFamily: "'Inter'", color: "#33475A" }}>
+            <span>Lodging ({result.nights} nights)</span><span>${result.lodgingTotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-[13.5px] mb-2" style={{ fontFamily: "'Inter'", color: "#33475A" }}>
+            <span>M&IE ({result.days} days, first/last at 75%)</span><span>${result.mieTotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between pt-2" style={{ borderTop: "1px solid #EEF4FA", fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>
+            <span>Estimated total</span><span>${result.total.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
+    </StaticPage>
+  );
+}
+
 function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, prefillHospital }) {
   const [query, setQuery] = useState("");
   const [selectedHospital, setSelectedHospital] = useState(prefillHospital || null);
@@ -1293,6 +1416,7 @@ function SideMenu({ open, onClose, onNavigate }) {
   const items = [
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
     { key: "account", label: "My Account" }, { key: "getVerified", label: "Get Verified" },
+    { key: "gsaCalculator", label: "Per Diem Calculator" },
     { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];
@@ -1544,6 +1668,7 @@ export default function App() {
         )}
 
         {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} />}
+        {view.page === "gsaCalculator" && <GsaCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}

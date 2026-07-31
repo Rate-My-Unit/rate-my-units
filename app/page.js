@@ -1026,122 +1026,156 @@ function StaticPage({ title, onBack, children }) {
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
 function GsaCalculatorPage({ onBack }) {
-  const [city, setCity] = useState("");
+  const [date, setDate] = useState("");
   const [stateAbbr, setStateAbbr] = useState("");
-  const [year, setYear] = useState(String(new Date().getFullYear()));
-  const [lookupStatus, setLookupStatus] = useState("idle"); // "idle" | "loading" | "found" | "notfound" | "error"
+  const [city, setCity] = useState("");
+  const [stateCities, setStateCities] = useState([]);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const [status, setStatus] = useState("idle"); // "idle" | "loading" | "found" | "notfound" | "error"
+  const [weekly, setWeekly] = useState(null);
+  const [manualLodging, setManualLodging] = useState("");
+  const [manualMeals, setManualMeals] = useState("");
 
-  const [lodgingRate, setLodgingRate] = useState("");
-  const [mieRate, setMieRate] = useState("");
-  const [nights, setNights] = useState("");
-  const [result, setResult] = useState(null);
+  const year = date ? new Date(date).getFullYear() : new Date().getFullYear();
+  const monthNum = date ? new Date(date).getMonth() + 1 : new Date().getMonth() + 1;
 
-  async function handleLookup() {
-    if (!city.trim() || !stateAbbr) return;
-    setLookupStatus("loading");
+  useEffect(() => {
+    setStateCities([]);
+    setCity("");
+    if (!stateAbbr) return;
+    let cancelled = false;
+    setCitiesLoading(true);
+    const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
+    fetch(`https://api.gsa.gov/travel/perdiem/v2/rates/state/${stateAbbr}/year/${year}?api_key=${apiKey}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const names = new Set();
+        (data?.rates?.[0]?.rate || []).forEach((r) => { if (r.city) names.add(r.city); });
+        setStateCities(Array.from(names).sort());
+      })
+      .catch(() => { if (!cancelled) setStateCities([]); })
+      .finally(() => { if (!cancelled) setCitiesLoading(false); });
+    return () => { cancelled = true; };
+  }, [stateAbbr, year]);
+
+  const cityMatches = useMemo(() => {
+    if (!city.trim()) return stateCities.slice(0, 8);
+    const q = city.toLowerCase();
+    return stateCities.filter((c) => c.toLowerCase().includes(q)).slice(0, 8);
+  }, [city, stateCities]);
+
+  async function handleCalculate() {
+    if (!stateAbbr) return;
+    setStatus("loading");
+    setWeekly(null);
     try {
       const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
-      const url = `https://api.gsa.gov/travel/perdiem/v2/rates/city/${encodeURIComponent(city.trim())}/state/${stateAbbr}/year/${year}?api_key=${apiKey}`;
+      const url = city.trim()
+        ? `https://api.gsa.gov/travel/perdiem/v2/rates/city/${encodeURIComponent(city.trim())}/state/${stateAbbr}/year/${year}?api_key=${apiKey}`
+        : `https://api.gsa.gov/travel/perdiem/v2/rates/state/${stateAbbr}/year/${year}?api_key=${apiKey}`;
       const res = await fetch(url);
       const data = await res.json();
       const rateEntry = data?.rates?.[0]?.rate?.[0];
-      if (!rateEntry) { setLookupStatus("notfound"); return; }
-
-      let foundLodging = null;
-      const monthNow = new Date().getMonth(); // 0-11
-      const monthAbbrs = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-      if (Array.isArray(rateEntry.months?.month)) {
-        const m = rateEntry.months.month.find((x) => Number(x.number) === monthNow + 1) || rateEntry.months.month[0];
-        if (m?.value) foundLodging = m.value;
-      } else if (rateEntry[monthAbbrs[monthNow]]) {
-        foundLodging = rateEntry[monthAbbrs[monthNow]];
-      }
-      const foundMie = rateEntry.meals;
-
-      if (foundLodging || foundMie) {
-        if (foundLodging) setLodgingRate(String(foundLodging));
-        if (foundMie) setMieRate(String(foundMie));
-        setLookupStatus("found");
-      } else {
-        setLookupStatus("notfound");
-      }
+      if (!rateEntry) { setStatus("notfound"); return; }
+      const monthEntry = rateEntry.months?.month?.find((m) => Number(m.number) === monthNum);
+      const dailyLodging = monthEntry?.value;
+      const dailyMeals = rateEntry.meals;
+      if (!dailyLodging || !dailyMeals) { setStatus("notfound"); return; }
+      setWeekly({ lodging: dailyLodging * 7, meals: dailyMeals * 7, total: (dailyLodging + dailyMeals) * 7 });
+      setStatus("found");
     } catch (e) {
-      setLookupStatus("error");
+      setStatus("error");
     }
   }
 
-  function handleCalculate() {
-    const lodging = parseFloat(lodgingRate) || 0;
-    const mie = parseFloat(mieRate) || 0;
-    const n = parseInt(nights, 10) || 0;
-    if (n <= 0) return;
-    const days = n + 1; // standard: nights + 1 travel days
-    const lodgingTotal = lodging * n;
-    let mieTotal;
-    if (days <= 1) {
-      mieTotal = mie * 0.75;
-    } else {
-      const fullMieDays = days - 2;
-      mieTotal = fullMieDays * mie + 2 * (mie * 0.75);
-    }
-    setResult({ lodgingTotal, mieTotal, total: lodgingTotal + mieTotal, days, nights: n });
+  function handleManualCalculate() {
+    const l = parseFloat(manualLodging) || 0;
+    const m = parseFloat(manualMeals) || 0;
+    setWeekly({ lodging: l * 7, meals: m * 7, total: (l + m) * 7 });
+    setStatus("found");
   }
 
   return (
-    <StaticPage title="Per Diem Calculator" onBack={onBack}>
-      <p>Estimate GSA per diem (lodging + meals &amp; incidentals) for a trip. These are official federal reimbursement rates — many travel contracts use them as a reference, but your actual pay package depends on your employer or agency.</p>
-      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8", fontStyle: "italic" }}>This is a rate estimator, not tax or financial advice.</p>
+    <StaticPage title="GSA Calculator" onBack={onBack}>
+      <p>Estimate GSA per diem (lodging + meals &amp; incidentals) for a trip. These are official federal reimbursement rates. Many travel contracts use them as a reference, but your actual pay package depends on your employer or agency.</p>
 
-      <div className="pt-2">
-        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Look up official rate (optional)</p>
-        <div className="grid grid-cols-2 gap-3 mb-2">
-          <TextInput value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
-          <select value={stateAbbr} onChange={(e) => setStateAbbr(e.target.value)} className="border rounded-xl px-3.5 py-2.5 text-sm" style={{ ...inputStyle, background: "#FFFFFF" }}>
-            <option value="">State</option>
-            {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+      <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+        <p style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }} className="mb-3">Enter Your Details</p>
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Start Date</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded-xl px-3.5 py-2.5 text-sm mb-3" style={inputStyle} />
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>State</label>
+        <select value={stateAbbr} onChange={(e) => setStateAbbr(e.target.value)} className="w-full border rounded-xl px-3.5 py-2.5 text-sm mb-3" style={{ ...inputStyle, background: "#FFFFFF" }}>
+          <option value="">Select a state</option>
+          {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>City</label>
+        <div className="relative mb-1">
+          <input
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            onFocus={() => setShowCityDropdown(true)}
+            onBlur={() => setTimeout(() => setShowCityDropdown(false), 150)}
+            placeholder={stateAbbr ? "Search city…" : "Pick a state first"}
+            disabled={!stateAbbr}
+            className="w-full border rounded-xl px-3.5 py-2.5 text-sm"
+            style={{ ...inputStyle, background: stateAbbr ? "#FFFFFF" : "#F4F8FC" }}
+          />
+          {showCityDropdown && stateAbbr && cityMatches.length > 0 && (
+            <div className="absolute left-0 right-0 mt-1 rounded-xl overflow-hidden z-10" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF", maxHeight: "220px", overflowY: "auto" }}>
+              {cityMatches.map((c) => (
+                <button key={c} onMouseDown={() => { setCity(c); setShowCityDropdown(false); }} className="w-full text-left px-3.5 py-2" style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#16324A", borderTop: "1px solid #EEF4FA" }}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="flex gap-2 items-center mb-2">
-          <TextInput value={year} onChange={(e) => setYear(e.target.value)} placeholder="Year" style={{ maxWidth: "100px" }} />
-          <PrimaryButton onClick={handleLookup}>{lookupStatus === "loading" ? "Looking up…" : "Look up rate"}</PrimaryButton>
+        {stateAbbr && citiesLoading && <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-2">Loading cities for {stateAbbr}…</p>}
+        {stateAbbr && !citiesLoading && <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-2">Showing {cityMatches.length} of {stateCities.length} cities. Leave blank to use {stateAbbr}'s standard rate.</p>}
+
+        <div className="pt-2">
+          <PrimaryButton onClick={handleCalculate} color="#0F9D6A">{status === "loading" ? "Calculating…" : "Calculate"}</PrimaryButton>
         </div>
-        {lookupStatus === "found" && <p style={{ color: "#0F5132", fontSize: "12.5px", fontFamily: "'Inter'" }}>✓ Found it — filled in below. Double-check against gsa.gov/perdiem if it looks off.</p>}
-        {lookupStatus === "notfound" && <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }}>Couldn't find that exact city. Try the nearest larger city, or look it up at gsa.gov/perdiem and enter the rates manually below.</p>}
-        {lookupStatus === "error" && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>Lookup failed — enter rates manually below instead.</p>}
+
+        {status === "notfound" && (
+          <div className="pt-3">
+            <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">Couldn't find that rate. Look it up at gsa.gov/perdiem and enter it manually:</p>
+            <div className="grid grid-cols-2 gap-3 mb-2">
+              <TextInput value={manualLodging} onChange={(e) => setManualLodging(e.target.value)} placeholder="Lodging / night ($)" />
+              <TextInput value={manualMeals} onChange={(e) => setManualMeals(e.target.value)} placeholder="Meals / day ($)" />
+            </div>
+            <PrimaryButton onClick={handleManualCalculate} color="#64809A">Calculate manually</PrimaryButton>
+          </div>
+        )}
+        {status === "error" && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }} className="pt-2">Something went wrong looking that up — try again in a moment.</p>}
       </div>
 
-      <div className="pt-3">
-        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Calculate your trip</p>
-        <div className="grid grid-cols-2 gap-3 mb-2">
-          <div>
-            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Lodging rate / night</label>
-            <TextInput value={lodgingRate} onChange={(e) => setLodgingRate(e.target.value)} placeholder="$" />
-          </div>
-          <div>
-            <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>M&IE rate / day</label>
-            <TextInput value={mieRate} onChange={(e) => setMieRate(e.target.value)} placeholder="$" />
-          </div>
-        </div>
-        <div className="mb-3">
-          <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Number of nights</label>
-          <TextInput value={nights} onChange={(e) => setNights(e.target.value)} placeholder="e.g. 13" />
-        </div>
-        <PrimaryButton onClick={handleCalculate} color="#0F9D6A">Calculate</PrimaryButton>
-      </div>
+      {weekly && (
+        <div className="rounded-2xl p-5 mt-2" style={{ background: "linear-gradient(135deg, #1B5E63, #2E8B92)" }}>
+          <p style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#FFFFFF", fontSize: "1.1rem" }} className="mb-1">Expected Stipends Breakdown</p>
+          <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#D8ECEC" }} className="mb-3">GSA max rates for {city || stateAbbr} {date && `in ${new Date(date).toLocaleString("en-US", { month: "long" })}`} are</p>
 
-      {result && (
-        <div className="rounded-2xl p-4 mt-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
-          <div className="flex justify-between text-[13.5px] mb-1" style={{ fontFamily: "'Inter'", color: "#33475A" }}>
-            <span>Lodging ({result.nights} nights)</span><span>${result.lodgingTotal.toFixed(2)}</span>
+          <div className="rounded-xl p-4 mb-3" style={{ background: "rgba(255,255,255,0.12)" }}>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#D8ECEC" }}>Lodging</p>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 800, color: "#FFFFFF", fontSize: "1.8rem" }}>${weekly.lodging.toFixed(0)} <span style={{ fontSize: "0.95rem", fontWeight: 400, color: "#D8ECEC" }}>/ week</span></p>
           </div>
-          <div className="flex justify-between text-[13.5px] mb-2" style={{ fontFamily: "'Inter'", color: "#33475A" }}>
-            <span>M&IE ({result.days} days, first/last at 75%)</span><span>${result.mieTotal.toFixed(2)}</span>
+          <div className="rounded-xl p-4 mb-3" style={{ background: "rgba(255,255,255,0.12)" }}>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#D8ECEC" }}>Meals</p>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 800, color: "#FFFFFF", fontSize: "1.8rem" }}>${weekly.meals.toFixed(0)} <span style={{ fontSize: "0.95rem", fontWeight: 400, color: "#D8ECEC" }}>/ week</span></p>
           </div>
-          <div className="flex justify-between pt-2" style={{ borderTop: "1px solid #EEF4FA", fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>
-            <span>Estimated total</span><span>${result.total.toFixed(2)}</span>
+          <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.22)", border: "2px solid rgba(255,255,255,0.6)" }}>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#EAF7F6" }}>Total Stipends</p>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 800, color: "#FFFFFF", fontSize: "1.8rem" }}>${weekly.total.toFixed(0)} <span style={{ fontSize: "0.95rem", fontWeight: 400, color: "#EAF7F6" }}>/ week</span></p>
           </div>
         </div>
       )}
+
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8", fontStyle: "italic" }} className="pt-2">This is a rate estimator, not tax or financial advice.</p>
     </StaticPage>
   );
 }
@@ -1416,7 +1450,7 @@ function SideMenu({ open, onClose, onNavigate }) {
   const items = [
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
     { key: "account", label: "My Account" }, { key: "getVerified", label: "Get Verified" },
-    { key: "gsaCalculator", label: "Per Diem Calculator" },
+    { key: "gsaCalculator", label: "GSA Calculator" },
     { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];

@@ -377,7 +377,8 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitTyp
   }, [user, hospitalId]);
 
   async function handleUpload() {
-    if (!file) return;
+    if (!hospitalId) { setError("Search for and select your hospital above first."); return; }
+    if (!file) { setError("Attach a file before submitting."); return; }
     setError("");
     setUploading(true);
     const path = `${user.id}/${hospitalId}-${Date.now()}-${file.name}`;
@@ -421,7 +422,7 @@ function HospitalVerifyPanel({ user, hospitalId, hospitalName, unitName, unitTyp
           </p>
           <input type="file" accept="image/*,.pdf" onChange={(e) => setFile(e.target.files[0])} className="w-full text-sm mb-3" style={{ fontFamily: "'Inter'", color: "#33475A" }} />
           {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">{error}</p>}
-          {file && <PrimaryButton onClick={handleUpload} color="#0F9D6A">{uploading ? "Uploading…" : submitLabel}</PrimaryButton>}
+          <PrimaryButton onClick={handleUpload} color="#0F9D6A">{uploading ? "Uploading…" : submitLabel}</PrimaryButton>
         </div>
       )}
     </div>
@@ -1089,15 +1090,12 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
             <TextInput value={unitType} onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. ICU, Med-Surg, Emergency" />
           </div>
 
-          {selectedHospital && (
-            <div className="pt-1">
-              <HospitalVerifyPanel user={user} hospitalId={selectedHospital.id} hospitalName={selectedHospital.name} unitName={unitName} unitType={unitType} onOpenSignIn={onOpenSignIn} embedded submitLabel="Submit Verification" />
-            </div>
-          )}
+          <div className="pt-1">
+            <HospitalVerifyPanel user={user} hospitalId={selectedHospital?.id} hospitalName={selectedHospital?.name || "your hospital"} unitName={unitName} unitType={unitType} onOpenSignIn={onOpenSignIn} embedded submitLabel="Submit Verification" />
+          </div>
         </div>
       )}
 
-      <div className="pt-3"><button onClick={onGoBrowse} className="text-[12.5px] font-semibold" style={{ fontFamily: "'Inter'", color: "#64809A" }}>← Browse hospitals instead</button></div>
     </StaticPage>
   );
 }

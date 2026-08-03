@@ -40,11 +40,13 @@ function helpfulScore(r) {
   return (r.helpful_up || 0) - (r.helpful_down || 0);
 }
 function scoreBg(score) {
+  if (!score) return "#DDE3DC";
   if (score >= 3.8) return "#A9F0CE";
   if (score >= 3.0) return "#FCE985";
   return "#F8AFAF";
 }
 function scoreTextColor(score) {
+  if (!score) return "#5B6B63";
   if (score >= 3.8) return "#0F5132";
   if (score >= 3.0) return "#7A5B00";
   return "#7A1313";

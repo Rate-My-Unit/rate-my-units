@@ -1476,8 +1476,37 @@ function AdminPage({ onBack, user }) {
       ...(hData || []).map((r) => ({ ...r, _type: "hospital" })),
       ...(uData || []).map((r) => ({ ...r, _type: "unit" })),
     ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    setRecentReports(combined);
+
+    const withHospitalId = combined.map((r) => ({
+      ...r,
+      _hospitalId: r._type === "hospital" ? r.hospitals?.id : r.units?.hospital_id,
+    }));
+    const pairs = withHospitalId.filter((r) => r._hospitalId).map((r) => `${r.user_id}|${r._hospitalId}`);
+    let verifiedSet = new Set();
+    if (pairs.length) {
+      const { data: vData } = await supabase.from("hospital_verifications").select("user_id, hospital_id").eq("status", "verified");
+      verifiedSet = new Set((vData || []).map((v) => `${v.user_id}|${v.hospital_id}`));
+    }
+    setRecentReports(withHospitalId.map((r) => ({ ...r, _verified: verifiedSet.has(`${r.user_id}|${r._hospitalId}`) })));
     setLoadingReports(false);
+  }
+
+  async function verifyFromReport(report) {
+    if (!report._hospitalId) return;
+    const { data: existing } = await supabase
+      .from("hospital_verifications")
+      .select("id")
+      .eq("user_id", report.user_id)
+      .eq("hospital_id", report._hospitalId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      await supabase.from("hospital_verifications").update({ status: "verified" }).eq("id", existing.id);
+    } else {
+      await supabase.from("hospital_verifications").insert({ user_id: report.user_id, hospital_id: report._hospitalId, status: "verified", file_path: null });
+    }
+    setRecentReports((prev) => prev.map((r) => (r.id === report.id ? { ...r, _verified: true } : r)));
   }
 
   async function handleSearch() {
@@ -1625,15 +1654,24 @@ function AdminPage({ onBack, user }) {
                 {r._type === "hospital" ? r.hospitals?.city : r.units?.hospitals?.name} · {r.role} · {(r.created_at || "").slice(0, 10)}
               </div>
               <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }} className="mb-2">{r.comment}</p>
-              {confirmingId === r.id ? (
-                <div className="flex items-center gap-2">
-                  <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
-                  <button onClick={() => handleDeleteReport(r._type, r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
-                  <button onClick={() => setConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
-                </div>
-              ) : (
-                <button onClick={() => setConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
-              )}
+              <div className="flex items-center gap-3 flex-wrap">
+                {confirmingId === r.id ? (
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+                    <button onClick={() => handleDeleteReport(r._type, r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                    <button onClick={() => setConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+                )}
+                {r._verified ? (
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'", fontWeight: 700, fontSize: "11px" }}>
+                    <ShieldCheck size={11} /> Verified
+                  </span>
+                ) : (
+                  <button onClick={() => verifyFromReport(r)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#0F9D6A" }}>Verify this account</button>
+                )}
+              </div>
             </div>
           ))}
         </div>

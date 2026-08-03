@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ShieldCheck, MapPin, Smile, Building2, Wifi, Star, Stethoscope, PartyPopper,
   UtensilsCrossed, Users, Briefcase, Heart, DollarSign, ThumbsUp, ThumbsDown,
@@ -131,9 +131,19 @@ function HelpfulVote({ review, userVote, onVote }) {
     </div>
   );
 }
-function ReviewCard({ review, categories, userVote, onVote, currentUserId, onDelete }) {
+function ReviewCard({ review, categories, userVote, onVote, currentUserId, onDelete, onReport }) {
   const [confirming, setConfirming] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [reportSent, setReportSent] = useState(false);
+  const [reportReason, setReportReason] = useState("Names a coworker or patient");
   const isMine = currentUserId && review.user_id === currentUserId;
+
+  function submitReport() {
+    onReport(review.id, reportReason);
+    setReporting(false);
+    setReportSent(true);
+  }
+
   return (
     <div className="py-4" style={{ borderTop: "1px solid #EEF4FA" }}>
       <div className="flex items-center justify-between mb-2">
@@ -167,7 +177,24 @@ function ReviewCard({ review, categories, userVote, onVote, currentUserId, onDel
             <button onClick={() => setConfirming(false)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
           </div>
         )}
+        {!isMine && onReport && (reportSent ? (
+          <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>Reported</span>
+        ) : !reporting ? (
+          <button onClick={() => setReporting(true)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Report</button>
+        ) : null)}
       </div>
+      {!isMine && reporting && !reportSent && (
+        <div className="flex items-center gap-2 pt-2 flex-wrap">
+          <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="border rounded-full px-2 py-1 text-[12px]" style={{ borderColor: "#D7E6F3", fontFamily: "'Inter'", color: "#16324A", background: "#FFFFFF" }}>
+            <option>Names a coworker or patient</option>
+            <option>Profanity or harassment</option>
+            <option>False information</option>
+            <option>Other</option>
+          </select>
+          <button onClick={submitReport} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Send</button>
+          <button onClick={() => setReporting(false)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -223,6 +250,37 @@ function AuthPanel({ onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(30);
   const [resendMsg, setResendMsg] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
+  const turnstileRef = useRef(null);
+  const widgetIdRef = useRef(null);
+
+  useEffect(() => {
+    if (screen !== "auth" || checkEmail) return;
+    let cancelled = false;
+    function renderWidget() {
+      if (cancelled || !turnstileRef.current || !window.turnstile) return;
+      if (widgetIdRef.current) {
+        try { window.turnstile.remove(widgetIdRef.current); } catch (e) {}
+      }
+      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+        callback: (token) => setCaptchaToken(token),
+        "expired-callback": () => setCaptchaToken(""),
+      });
+    }
+    if (window.turnstile) {
+      renderWidget();
+    } else {
+      const check = setInterval(() => {
+        if (window.turnstile) {
+          clearInterval(check);
+          renderWidget();
+        }
+      }, 300);
+      return () => { cancelled = true; clearInterval(check); };
+    }
+    return () => { cancelled = true; };
+  }, [screen, checkEmail, mode]);
 
   useEffect(() => {
     if (!checkEmail) return;
@@ -248,14 +306,15 @@ function AuthPanel({ onClose }) {
   async function handleSubmit() {
     if (!email.includes("@")) { setError("Enter a valid email."); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (!captchaToken) { setError("Please complete the verification check above."); return; }
     setError("");
     setSubmitting(true);
     if (mode === "signup") {
-      const { error: err } = await supabase.auth.signUp({ email, password });
+      const { error: err } = await supabase.auth.signUp({ email, password, options: { captchaToken } });
       if (err) setError(err.message);
       else setCheckEmail(true);
     } else {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken } });
       if (err) setError(err.message);
       else onClose();
     }
@@ -327,8 +386,14 @@ function AuthPanel({ onClose }) {
             {mode === "signin" && (
               <button onClick={() => { setScreen("forgot"); setError(""); }} className="text-[12.5px] font-semibold block" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Forgot password?</button>
             )}
+            <div ref={turnstileRef} />
             {error && <p style={{ color: "#B23A34", fontSize: "12.5px", fontFamily: "'Inter'" }}>{error}</p>}
             <PrimaryButton onClick={handleSubmit}>{submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}</PrimaryButton>
+            {mode === "signup" && (
+              <p style={{ fontFamily: "'Inter'", fontSize: "11px", color: "#93A7B8" }} className="text-center pt-1">
+                By creating an account, you agree to our Terms of Service and Privacy Policy.
+              </p>
+            )}
           </div>
         ))}
       </div>
@@ -472,7 +537,7 @@ function ReviewForm({ categories, reviewType, hospitalId, hospitalName, onSubmit
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ fontFamily: "'Inter'", color: "#64809A" }}>File your report</div>
       <div className="rounded-xl px-3.5 py-2.5 mb-4" style={{ background: "#FCE985" }}>
         <p style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#5A4300", lineHeight: 1.5 }}>
-          Keep it respectful and anonymous — don't name any specific coworkers, managers, or patients, and no profanity. Accounts that don't follow this get banned.
+          Keep it respectful and anonymous — don't name coworkers or managers, and don't describe specific patients or patient situations, even without a name. No profanity. Accounts that don't follow this get banned.
         </p>
       </div>
       <div className="space-y-4">
@@ -743,7 +808,7 @@ function CompareView({ type, base, hospitals, onBack }) {
   );
 }
 
-function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onGetVerified, user, onOpenSignIn, autoOpenReview }) {
+function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onGetVerified, user, onOpenSignIn, autoOpenReview }) {
   const [showForm, setShowForm] = useState(!!autoOpenReview);
   const [reviewSort, setReviewSort] = useState("newest");
 
@@ -792,13 +857,13 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
 
       <div>
         {reviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No reports yet on this unit. Be the first to file one.</p>}
-        {sortedReviews.map((r) => <ReviewCard key={r.id} review={r} categories={UNIT_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("unit", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("unit", id)} />)}
+        {sortedReviews.map((r) => <ReviewCard key={r.id} review={r} categories={UNIT_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("unit", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("unit", id)} onReport={(id, reason) => onReportPost("unit", id, reason)} />)}
       </div>
     </div>
   );
 }
 
-function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onVote, userVotes, onCompare, onOpenAddUnit, onGetVerified, user, onOpenSignIn }) {
+function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onOpenAddUnit, onGetVerified, user, onOpenSignIn }) {
   const [tab, setTab] = useState("overview");
   const [sort, setSort] = useState("rating-desc");
   const [showForm, setShowForm] = useState(false);
@@ -863,7 +928,7 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteRev
           {showForm && <ReviewForm categories={HOSPITAL_CATEGORIES} reviewType="hospital" hospitalId={hospital.id} hospitalName={hospital.name} rolePlaceholder="e.g. RN, Emergency" user={user} onOpenSignIn={onOpenSignIn} onCancel={() => setShowForm(false)} onSubmit={(rev) => onAddReview(hospital.id, rev)} onDone={() => setShowForm(false)} />}
           <div>
             {hReviews.length === 0 && <p className="py-6 text-center" style={{ fontFamily: "'Inter'", color: "#64809A", fontSize: "13.5px" }}>No hospital-wide reports yet. Be the first to file one.</p>}
-            {sortedHospitalReviews.map((r) => <ReviewCard key={r.id} review={r} categories={HOSPITAL_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("hospital", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("hospital", id)} />)}
+            {sortedHospitalReviews.map((r) => <ReviewCard key={r.id} review={r} categories={HOSPITAL_CATEGORIES} userVote={userVotes[r.id]} onVote={(id, dir) => onVote("hospital", id, dir)} currentUserId={user?.id} onDelete={(id) => onDeleteReview("hospital", id)} onReport={(id, reason) => onReportPost("hospital", id, reason)} />)}
           </div>
         </div>
       )}
@@ -1472,6 +1537,8 @@ function AdminPage({ onBack, user }) {
   const [userConfirmingId, setUserConfirmingId] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
+  const [flaggedReports, setFlaggedReports] = useState([]);
+  const [loadingFlagged, setLoadingFlagged] = useState(true);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
@@ -1480,7 +1547,45 @@ function AdminPage({ onBack, user }) {
     loadRecentReports();
     loadPendingVerifications();
     loadAnalytics();
+    loadFlaggedReports();
   }, [isAdmin]);
+
+  async function loadFlaggedReports() {
+    setLoadingFlagged(true);
+    const { data: repRows } = await supabase.from("reports").select("*").eq("status", "open").order("created_at", { ascending: true });
+    const rows = repRows || [];
+    const hospitalIds = rows.filter((r) => r.post_type === "hospital").map((r) => r.post_id);
+    const unitIds = rows.filter((r) => r.post_type === "unit").map((r) => r.post_id);
+    let hMap = {}, uMap = {};
+    if (hospitalIds.length) {
+      const { data } = await supabase.from("hospital_reviews").select("*, hospitals(name, city)").in("id", hospitalIds);
+      (data || []).forEach((d) => { hMap[d.id] = d; });
+    }
+    if (unitIds.length) {
+      const { data } = await supabase.from("unit_reviews").select("*, units(name, hospitals(name, city))").in("id", unitIds);
+      (data || []).forEach((d) => { uMap[d.id] = d; });
+    }
+    const reporterIds = [...new Set(rows.map((r) => r.reporter_id))];
+    let emailMap = {};
+    if (reporterIds.length) {
+      const { data } = await supabase.from("profiles").select("id, email").in("id", reporterIds);
+      emailMap = Object.fromEntries((data || []).map((p) => [p.id, p.email]));
+    }
+    setFlaggedReports(rows.map((r) => ({ ...r, post: r.post_type === "hospital" ? hMap[r.post_id] : uMap[r.post_id], reporterEmail: emailMap[r.reporter_id] })));
+    setLoadingFlagged(false);
+  }
+
+  async function dismissFlag(reportId) {
+    await supabase.from("reports").update({ status: "resolved" }).eq("id", reportId);
+    setFlaggedReports((prev) => prev.filter((r) => r.id !== reportId));
+  }
+
+  async function deleteFlaggedPost(report) {
+    const table = report.post_type === "hospital" ? "hospital_reviews" : "unit_reviews";
+    await supabase.from(table).delete().eq("id", report.post_id);
+    await supabase.from("reports").update({ status: "resolved" }).eq("id", report.id);
+    setFlaggedReports((prev) => prev.filter((r) => r.id !== report.id));
+  }
 
   async function loadAnalytics() {
     setLoadingAnalytics(true);
@@ -1794,6 +1899,40 @@ function AdminPage({ onBack, user }) {
       </div>
 
       <div className="pt-5">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Flagged posts ({flaggedReports.length})</p>
+        {loadingFlagged && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        {!loadingFlagged && flaggedReports.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Nothing flagged.</p>}
+        <div className="space-y-2">
+          {flaggedReports.map((r) => (
+            <div key={r.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+              <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>
+                {r.post_type === "hospital" ? r.post?.hospitals?.name : r.post?.units?.name}
+              </div>
+              <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">
+                {r.post_type === "hospital" ? r.post?.hospitals?.city : r.post?.units?.hospitals?.name} · reported by {r.reporterEmail || "unknown"}
+              </div>
+              <div style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#7A5B00", fontWeight: 600 }} className="mb-2">Reason: {r.reason}</div>
+              {r.post ? (
+                <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }} className="mb-2">{r.post.comment}</p>
+              ) : (
+                <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#93A7B8" }} className="mb-2">Post no longer exists.</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => dismissFlag(r.id)} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#EAF3FB", color: "#16324A", fontFamily: "'Inter'" }}>
+                  Dismiss
+                </button>
+                {r.post && (
+                  <button onClick={() => deleteFlaggedPost(r)} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#F8AFAF", color: "#7A1313", fontFamily: "'Inter'" }}>
+                    Delete post
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-5">
         <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Recent reports</p>
         {loadingReports && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
         <div className="space-y-2">
@@ -1908,6 +2047,106 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
     </StaticPage>
   );
 }
+function TermsPage({ onBack }) {
+  return (
+    <StaticPage title="Terms of Service" onBack={onBack}>
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }}>Effective August 2026</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>1. What this is</p>
+      <p>Rate My Unit lets healthcare workers rate and review the hospitals and specific units where they've worked, and helps job seekers see that feedback before accepting a position. By creating an account or using this site, you agree to these terms.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>2. Who can use this</p>
+      <p>You must be at least 18 years old and able to enter a binding agreement to create an account. You're responsible for keeping your password secure and for anything that happens under your account.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>3. What you post</p>
+      <p>Reviews should reflect your own genuine experience working at a specific hospital or unit. You agree not to:</p>
+      <ul style={{ paddingLeft: "20px", listStyle: "disc" }}>
+        <li>Name or identify specific coworkers, managers, or patients</li>
+        <li>Post anything false, defamatory, or written to harass a particular person</li>
+        <li>Post any patient health information, even anonymized details that could identify someone</li>
+        <li>Use profanity, hate speech, or threats</li>
+        <li>Post content you don't have the right to share, or that infringes someone else's rights</li>
+        <li>Create multiple accounts to post duplicate or misleading reviews</li>
+        <li>Scrape, copy, or republish the site's content without permission</li>
+      </ul>
+      <p>We can remove any post, at any time, for any reason, including posts that don't break these rules but that we decide don't serve the site's purpose.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>4. Verification</p>
+      <p>You can optionally submit proof of employment — a badge photo, pay stub, or similar document — to have your reports marked Verified for a specific hospital. These documents are reviewed by our team, are never shown publicly, and are not shared with your employer or anyone else outside our review process. Submitting false verification documents will result in account termination.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>5. Enforcement</p>
+      <p>We can suspend, limit, or permanently ban any account for violating these terms or for conduct we determine is harmful to the site or its users. We don't owe advance notice or an explanation before doing so.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>6. No employment or legal advice</p>
+      <p>Nothing on this site is professional legal, tax, financial, or career advice. Ratings, calculators — including the GSA per diem and income tools — and reviews are informational estimates based on user submissions and public data; they may be inaccurate, outdated, or incomplete. Confirm anything important directly with the relevant employer or agency before relying on it.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>7. Content ownership</p>
+      <p>You keep ownership of what you post, but by posting it you give us a permanent, worldwide, royalty-free license to display and use it as part of the site, including in aggregate or summarized form. We can keep and display content after you delete your account, since reviews are already posted anonymously and aren't tied to your identity for other users.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>8. Disclaimers</p>
+      <p>The site is provided as-is. We don't guarantee reviews are accurate, complete, or unbiased — they reflect individual opinions, not verified facts about any hospital, except where explicitly marked Verified, which only confirms employment, not the accuracy of the opinions themselves.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>9. Limitation of liability</p>
+      <p>To the extent allowed by law, we aren't liable for indirect, incidental, or consequential damages arising from your use of the site. Our total liability for any claim is limited to the amount you've paid us in the past 12 months, which for most users is $0.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>10. Changes</p>
+      <p>We can update these terms as the site evolves. Continued use after a change means you accept the new terms.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>11. Contact</p>
+      <p>Questions about these terms: <a href="mailto:support@ratemyunit.org" style={{ color: "#3E8EDE" }}>support@ratemyunit.org</a></p>
+    </StaticPage>
+  );
+}
+
+function PrivacyPage({ onBack }) {
+  return (
+    <StaticPage title="Privacy Policy" onBack={onBack}>
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }}>Effective August 2026</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>1. What we collect</p>
+      <ul style={{ paddingLeft: "20px", listStyle: "disc" }}>
+        <li>Account info: your email address and password — we never see or store your actual password, only an encrypted hash</li>
+        <li>Content you post: reviews, ratings, comments, and any hospital or unit info you add</li>
+        <li>Verification documents, if you choose to submit proof of employment</li>
+        <li>Basic, anonymous usage data — page visits and general activity, tracked through Vercel Analytics and our own internal counter</li>
+      </ul>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>2. What we don't collect</p>
+      <p>We don't ask for your real name, home address, phone number, or Social Security number. We don't track your location. We don't sell your data — there's no ad network or data broker relationship on this site.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>3. How we use it</p>
+      <ul style={{ paddingLeft: "20px", listStyle: "disc" }}>
+        <li>To create and manage your account, and let you sign in</li>
+        <li>To display your reviews anonymously — your email is never shown to other users</li>
+        <li>To review verification requests</li>
+        <li>To improve the site and understand basic usage patterns</li>
+        <li>To enforce our Terms of Service, including investigating reports and applying bans when needed</li>
+      </ul>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>4. Who can see what</p>
+      <p>Other users see your posted reviews and your role or shift description, but never your email or identity. Verification documents are visible only to our admin team, for the purpose of approving or rejecting the request. We don't share your email, verification documents, or account activity with your employer or anyone else, except if legally required to — for example, a valid court order.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>5. Where your data lives</p>
+      <p>Your account and content are stored with Supabase, a third-party database provider, hosted in the United States. Verification files sit in a private, access-controlled storage bucket that only our admin account can read.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>6. Your choices</p>
+      <p>You can delete any review you've posted at any time, from the review itself or from your account page. You can request full account deletion by emailing <a href="mailto:support@ratemyunit.org" style={{ color: "#3E8EDE" }}>support@ratemyunit.org</a> — we'll remove your account and personal information, though anonymized review content may remain, since it was never tied to your identity for other users in the first place.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>7. Local storage</p>
+      <p>We use your browser's local storage to keep you signed in between visits. We don't use tracking cookies for advertising.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>8. Children</p>
+      <p>This site isn't intended for anyone under 18.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>9. Changes to this policy</p>
+      <p>If this policy changes in a meaningful way, we'll update the effective date above.</p>
+
+      <p style={{ fontWeight: 700, color: "#16324A" }}>10. Contact</p>
+      <p>Questions about your data: <a href="mailto:support@ratemyunit.org" style={{ color: "#3E8EDE" }}>support@ratemyunit.org</a></p>
+    </StaticPage>
+  );
+}
+
 function AboutPage({ onBack }) {
   return (
     <StaticPage title="What's the goal?" onBack={onBack}>
@@ -2169,6 +2408,7 @@ function SideMenu({ open, onClose, onNavigate, user }) {
     { key: "incomeCalculator", label: "Income Calculator" },
     { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
+    { key: "terms", label: "Terms of Service" }, { key: "privacy", label: "Privacy Policy" },
   ];
   if (user && user.id === ADMIN_USER_ID) items.push({ key: "admin", label: "Admin" });
   if (!open) return null;
@@ -2301,6 +2541,10 @@ export default function App() {
     await supabase.from(table).delete().eq("id", reviewId);
     await fetchHospitals();
   }
+  async function reportPost(postType, postId, reason) {
+    if (!user) return;
+    await supabase.from("reports").insert({ post_id: postId, post_type: postType, reporter_id: user.id, reason });
+  }
   async function addUnit(payload) {
     let hospitalMeta = payload.hospitalMeta;
     let hospitalId = payload.hospitalId;
@@ -2384,6 +2628,7 @@ export default function App() {
             onSelectUnit={(u) => setView({ page: "unit", hospital: view.hospital, unit: u, from: view })}
             onAddReview={addHospitalReview}
             onDeleteReview={deleteReview}
+            onReportPost={reportPost}
             onVote={castVote}
             userVotes={userVotes}
             onCompare={() => setView({ page: "compare", type: "hospital", base: hospitals.find((h) => h.id === view.hospital.id), from: view })}
@@ -2402,6 +2647,7 @@ export default function App() {
             onBackToHospital={() => setView({ page: "hospital", hospital: view.hospital })}
             onAddReview={addUnitReview}
             onDeleteReview={deleteReview}
+            onReportPost={reportPost}
             onVote={castVote}
             userVotes={userVotes}
             user={user}
@@ -2436,6 +2682,8 @@ export default function App() {
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}
+        {view.page === "terms" && <TermsPage onBack={() => setView(view.from || { page: "home" })} />}
+        {view.page === "privacy" && <PrivacyPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "account" && (
           <AccountPage
             onBack={() => setView(view.from || { page: "home" })}

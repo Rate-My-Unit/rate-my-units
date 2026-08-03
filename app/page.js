@@ -1421,13 +1421,44 @@ function AdminPage({ onBack, user }) {
   const [recentReports, setRecentReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
+  const [pendingVerifications, setPendingVerifications] = useState([]);
+  const [loadingVerifications, setLoadingVerifications] = useState(true);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
   useEffect(() => {
     if (!isAdmin) return;
     loadRecentReports();
+    loadPendingVerifications();
   }, [isAdmin]);
+
+  async function loadPendingVerifications() {
+    setLoadingVerifications(true);
+    const { data } = await supabase
+      .from("hospital_verifications")
+      .select("*, hospitals(id, name, city)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true });
+    const rows = data || [];
+    const userIds = [...new Set(rows.map((r) => r.user_id))];
+    let emailMap = {};
+    if (userIds.length) {
+      const { data: profs } = await supabase.from("profiles").select("id, email").in("id", userIds);
+      emailMap = Object.fromEntries((profs || []).map((p) => [p.id, p.email]));
+    }
+    setPendingVerifications(rows.map((r) => ({ ...r, email: emailMap[r.user_id] })));
+    setLoadingVerifications(false);
+  }
+
+  async function viewProof(path) {
+    const { data } = await supabase.storage.from("verification-proof").createSignedUrl(path, 120);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+  }
+
+  async function handleVerificationDecision(id, decision) {
+    await supabase.from("hospital_verifications").update({ status: decision }).eq("id", id);
+    setPendingVerifications((prev) => prev.filter((r) => r.id !== id));
+  }
 
   async function loadRecentReports() {
     setLoadingReports(true);
@@ -1547,6 +1578,37 @@ function AdminPage({ onBack, user }) {
             );
           })}
           {results.length === 0 && query && !searching && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>No accounts found.</p>}
+        </div>
+      </div>
+
+      <div className="pt-5">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Pending verifications ({pendingVerifications.length})</p>
+        {loadingVerifications && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        {!loadingVerifications && pendingVerifications.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Nothing waiting on review.</p>}
+        <div className="space-y-2">
+          {pendingVerifications.map((v) => (
+            <div key={v.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+              <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{v.hospitals?.name}</div>
+              <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">{v.hospitals?.city} · requested by {v.email || "unknown"}</div>
+              {(v.unit_name || v.unit_type) && (
+                <div style={{ fontFamily: "'Inter'", fontSize: "12.5px", color: "#33475A" }} className="mb-1">
+                  Unit: {v.unit_name || "—"} {v.unit_type ? `(${v.unit_type})` : ""}
+                </div>
+              )}
+              <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-2">Submitted {(v.created_at || "").slice(0, 10)}</div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => viewProof(v.file_path)} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#EAF3FB", color: "#16324A", fontFamily: "'Inter'" }}>
+                  View proof
+                </button>
+                <button onClick={() => handleVerificationDecision(v.id, "verified")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
+                  Approve
+                </button>
+                <button onClick={() => handleVerificationDecision(v.id, "rejected")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#F8AFAF", color: "#7A1313", fontFamily: "'Inter'" }}>
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -259,14 +259,19 @@ function AuthPanel({ onClose }) {
     let cancelled = false;
     function renderWidget() {
       if (cancelled || !turnstileRef.current || !window.turnstile) return;
-      if (widgetIdRef.current) {
-        try { window.turnstile.remove(widgetIdRef.current); } catch (e) {}
+      if (!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) return;
+      try {
+        if (widgetIdRef.current) {
+          try { window.turnstile.remove(widgetIdRef.current); } catch (e) {}
+        }
+        widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+          sitekey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+          callback: (token) => setCaptchaToken(token),
+          "expired-callback": () => setCaptchaToken(""),
+        });
+      } catch (e) {
+        // If the widget can't render for any reason, fail quietly rather than crashing the panel.
       }
-      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
-        sitekey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
-        callback: (token) => setCaptchaToken(token),
-        "expired-callback": () => setCaptchaToken(""),
-      });
     }
     if (window.turnstile) {
       renderWidget();

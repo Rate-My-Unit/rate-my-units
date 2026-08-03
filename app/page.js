@@ -8,6 +8,7 @@ import {
 import { supabase } from "../lib/supabaseClient";
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');`;
+const ADMIN_USER_ID = "2d793bf4-08af-4382-b074-47c5ef968611";
 
 const UNIT_CATEGORIES = [
   { key: "ratios", label: "Staffing ratios", icon: Users },
@@ -453,7 +454,7 @@ function ReviewForm({ categories, reviewType, hospitalId, hospitalName, onSubmit
     setSubmitting(true);
     const id = await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
     setSubmitting(false);
-    if (id) { setStep("verify"); } else { onDone(); }
+    if (id) { setStep("verify"); } else { setError("Your report couldn't be posted. If this keeps happening, contact support@ratemyunit.org."); }
   }
 
   if (step === "verify") {
@@ -976,11 +977,27 @@ function AllUnitsView({ hospitals, onSelectUnit, onOpenAddUnit }) {
   );
 }
 
+function mostRecentActivity(h) {
+  const times = [
+    ...(h.hospital_reviews || []).map((r) => r.created_at),
+    ...(h.units || []).flatMap((u) => (u.unit_reviews || []).map((r) => r.created_at)),
+  ].filter(Boolean).map((t) => new Date(t).getTime());
+  return times.length ? Math.max(...times) : null;
+}
+
 function HomeView({ hospitals, onSelectHospital, onOpenAddUnit }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
-    return hospitals.filter((h) => h.name.toLowerCase().includes(q) || h.city.toLowerCase().includes(q));
+    const matches = hospitals.filter((h) => h.name.toLowerCase().includes(q) || h.city.toLowerCase().includes(q));
+    return [...matches].sort((a, b) => {
+      const at = mostRecentActivity(a);
+      const bt = mostRecentActivity(b);
+      if (at && bt) return bt - at;
+      if (at) return -1;
+      if (bt) return 1;
+      return a.name.localeCompare(b.name);
+    });
   }, [hospitals, query]);
 
   return (
@@ -1397,6 +1414,172 @@ function GsaCalculatorPage({ onBack }) {
   );
 }
 
+function AdminPage({ onBack, user }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [recentReports, setRecentReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [confirmingId, setConfirmingId] = useState(null);
+
+  const isAdmin = user && user.id === ADMIN_USER_ID;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadRecentReports();
+  }, [isAdmin]);
+
+  async function loadRecentReports() {
+    setLoadingReports(true);
+    const { data: hData } = await supabase
+      .from("hospital_reviews")
+      .select("*, hospitals(id, name, city)")
+      .order("created_at", { ascending: false })
+      .limit(15);
+    const { data: uData } = await supabase
+      .from("unit_reviews")
+      .select("*, units(id, name, hospital_id, hospitals(id, name, city))")
+      .order("created_at", { ascending: false })
+      .limit(15);
+    const combined = [
+      ...(hData || []).map((r) => ({ ...r, _type: "hospital" })),
+      ...(uData || []).map((r) => ({ ...r, _type: "unit" })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    setRecentReports(combined);
+    setLoadingReports(false);
+  }
+
+  async function handleSearch() {
+    if (!query.trim()) { setResults([]); return; }
+    setSearching(true);
+    const { data } = await supabase.from("profiles").select("*").ilike("email", `%${query.trim()}%`).limit(20);
+    setResults(data || []);
+    setSearching(false);
+  }
+
+  async function applyBan(profileId, mode, days) {
+    let update = {};
+    if (mode === "permanent") update = { is_banned: true, banned_until: null };
+    else if (mode === "temp") update = { is_banned: false, banned_until: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() };
+    else if (mode === "unban") update = { is_banned: false, banned_until: null };
+    await supabase.from("profiles").update(update).eq("id", profileId);
+    setResults((prev) => prev.map((p) => (p.id === profileId ? { ...p, ...update } : p)));
+  }
+
+  async function handleDeleteReport(reportType, reportId) {
+    const table = reportType === "hospital" ? "hospital_reviews" : "unit_reviews";
+    await supabase.from(table).delete().eq("id", reportId);
+    setRecentReports((prev) => prev.filter((r) => r.id !== reportId));
+    setConfirmingId(null);
+  }
+
+  async function toggleShadowBan(profileId, current) {
+    await supabase.from("profiles").update({ is_shadow_banned: !current }).eq("id", profileId);
+    setResults((prev) => prev.map((p) => (p.id === profileId ? { ...p, is_shadow_banned: !current } : p)));
+  }
+
+  function banStatus(p) {
+    if (p.is_banned) return { label: "Banned permanently", color: "#7A1313" };
+    if (p.banned_until && new Date(p.banned_until) > new Date()) {
+      return { label: `Temp banned until ${new Date(p.banned_until).toLocaleDateString()}`, color: "#7A5B00" };
+    }
+    return { label: "Active", color: "#0F5132" };
+  }
+
+  if (!isAdmin) {
+    return (
+      <StaticPage title="Admin" onBack={onBack}>
+        <p>This page isn't available.</p>
+      </StaticPage>
+    );
+  }
+
+  return (
+    <StaticPage title="Admin" onBack={onBack}>
+      <div>
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Search users</p>
+        <div className="flex gap-2 mb-3">
+          <TextInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by email…" />
+          <PrimaryButton onClick={handleSearch}>{searching ? "…" : "Search"}</PrimaryButton>
+        </div>
+        <div className="space-y-2">
+          {results.map((p) => {
+            const status = banStatus(p);
+            return (
+              <div key={p.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{p.email}</div>
+                <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: status.color, fontWeight: 600 }} className="mb-1">{status.label}</div>
+                {p.is_shadow_banned && <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A5B00", fontWeight: 600 }} className="mb-2">🕶 Shadow banned</div>}
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {status.label === "Active" ? (
+                    <>
+                      <select id={`dur-${p.id}`} className="border rounded-full px-2 py-1 text-[12px]" style={{ ...inputStyle, background: "#FFFFFF" }} defaultValue="1">
+                        <option value="1">1 day</option>
+                        <option value="3">3 days</option>
+                        <option value="7">7 days</option>
+                        <option value="30">30 days</option>
+                      </select>
+                      <button
+                        onClick={(e) => { const sel = e.target.parentElement.querySelector("select"); applyBan(p.id, "temp", Number(sel.value)); }}
+                        className="px-3 py-1 rounded-full text-[12px] font-semibold"
+                        style={{ background: "#FCE985", color: "#7A5B00", fontFamily: "'Inter'" }}
+                      >
+                        Temp ban
+                      </button>
+                      <button onClick={() => applyBan(p.id, "permanent")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#F8AFAF", color: "#7A1313", fontFamily: "'Inter'" }}>
+                        Ban permanently
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => applyBan(p.id, "unban")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
+                      Unban
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => toggleShadowBan(p.id, p.is_shadow_banned)}
+                  className="px-3 py-1 rounded-full text-[12px] font-semibold"
+                  style={{ background: p.is_shadow_banned ? "#EAF3FB" : "#16324A", color: p.is_shadow_banned ? "#16324A" : "#FFFFFF", fontFamily: "'Inter'" }}
+                >
+                  {p.is_shadow_banned ? "Remove shadow ban" : "Shadow ban"}
+                </button>
+              </div>
+            );
+          })}
+          {results.length === 0 && query && !searching && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>No accounts found.</p>}
+        </div>
+      </div>
+
+      <div className="pt-5">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Recent reports</p>
+        {loadingReports && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        <div className="space-y-2">
+          {recentReports.map((r) => (
+            <div key={r.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+              <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>
+                {r._type === "hospital" ? r.hospitals?.name : r.units?.name}
+              </div>
+              <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">
+                {r._type === "hospital" ? r.hospitals?.city : r.units?.hospitals?.name} · {r.role} · {(r.created_at || "").slice(0, 10)}
+              </div>
+              <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }} className="mb-2">{r.comment}</p>
+              {confirmingId === r.id ? (
+                <div className="flex items-center gap-2">
+                  <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+                  <button onClick={() => handleDeleteReport(r._type, r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                  <button onClick={() => setConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </StaticPage>
+  );
+}
+
 function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, prefillHospital }) {
   const [query, setQuery] = useState("");
   const [selectedHospital, setSelectedHospital] = useState(prefillHospital || null);
@@ -1726,7 +1909,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
   );
 }
 
-function SideMenu({ open, onClose, onNavigate }) {
+function SideMenu({ open, onClose, onNavigate, user }) {
   const items = [
     { key: "home", label: "Browse Hospitals" }, { key: "allUnits", label: "Browse Units" },
     { key: "account", label: "My Account" }, { key: "getVerified", label: "Get Verified" },
@@ -1735,6 +1918,7 @@ function SideMenu({ open, onClose, onNavigate }) {
     { key: "about", label: "What's the goal?" },
     { key: "help", label: "Help" }, { key: "contact", label: "Contact Us" },
   ];
+  if (user && user.id === ADMIN_USER_ID) items.push({ key: "admin", label: "Admin" });
   if (!open) return null;
   return (
     <div className="fixed inset-0" style={{ zIndex: 50 }}>
@@ -1818,11 +2002,17 @@ export default function App() {
       .select("user_id, hospital_id")
       .eq("status", "verified");
     const verifiedSet = new Set((verifiedPairs || []).map((v) => `${v.user_id}|${v.hospital_id}`));
+
+    const { data: shadowRows } = await supabase.from("profiles").select("id").eq("is_shadow_banned", true);
+    const shadowSet = new Set((shadowRows || []).map((p) => p.id));
+    const viewerId = user?.id;
+    const visibleToMe = (r) => !shadowSet.has(r.user_id) || r.user_id === viewerId;
+
     if (!error) {
       const withVerified = (data || []).map((h) => ({
         ...h,
-        hospital_reviews: (h.hospital_reviews || []).map((r) => ({ ...r, verified: verifiedSet.has(`${r.user_id}|${h.id}`) })),
-        units: (h.units || []).map((u) => ({ ...u, unit_reviews: (u.unit_reviews || []).map((r) => ({ ...r, verified: verifiedSet.has(`${r.user_id}|${h.id}`) })) })),
+        hospital_reviews: (h.hospital_reviews || []).filter(visibleToMe).map((r) => ({ ...r, verified: verifiedSet.has(`${r.user_id}|${h.id}`) })),
+        units: (h.units || []).map((u) => ({ ...u, unit_reviews: (u.unit_reviews || []).filter(visibleToMe).map((r) => ({ ...r, verified: verifiedSet.has(`${r.user_id}|${h.id}`) })) })),
       }));
       setHospitals(withVerified);
     }
@@ -1838,6 +2028,10 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    fetchHospitals();
+  }, [user?.id]);
 
   async function addUnitReview(unitId, review) {
     const { data } = await supabase.from("unit_reviews").insert({ unit_id: unitId, user_id: user.id, ...review }).select().single();
@@ -1922,7 +2116,7 @@ export default function App() {
         </div>
       </header>
 
-      <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={handleMenuNavigate} />
+      <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onNavigate={handleMenuNavigate} user={user} />
       {signInOpen && <AuthPanel onClose={() => setSignInOpen(false)} />}
       {recoveryMode && <SetNewPasswordPanel onDone={() => setRecoveryMode(false)} />}
 
@@ -1983,6 +2177,7 @@ export default function App() {
         )}
 
         {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} />}
+        {view.page === "admin" && <AdminPage onBack={() => setView(view.from || { page: "home" })} user={user} />}
         {view.page === "gsaCalculator" && <GsaCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "incomeCalculator" && <IncomeCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
         {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}

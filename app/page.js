@@ -1414,6 +1414,49 @@ function GsaCalculatorPage({ onBack }) {
   );
 }
 
+function BanControls({ p, banStatus, onBan, onShadowToggle }) {
+  const status = banStatus(p);
+  return (
+    <div>
+      <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: status.color, fontWeight: 600 }} className="mb-1">{status.label}</div>
+      {p.is_shadow_banned && <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A5B00", fontWeight: 600 }} className="mb-2">🕶 Shadow banned</div>}
+      <div className="flex flex-wrap gap-2 mb-2">
+        {status.label === "Active" ? (
+          <>
+            <select id={`dur-${p.id}`} className="border rounded-full px-2 py-1 text-[12px]" style={{ ...inputStyle, background: "#FFFFFF" }} defaultValue="1">
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="30">30 days</option>
+            </select>
+            <button
+              onClick={(e) => { const sel = e.target.parentElement.querySelector("select"); onBan(p.id, "temp", Number(sel.value)); }}
+              className="px-3 py-1 rounded-full text-[12px] font-semibold"
+              style={{ background: "#FCE985", color: "#7A5B00", fontFamily: "'Inter'" }}
+            >
+              Temp ban
+            </button>
+            <button onClick={() => onBan(p.id, "permanent")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#F8AFAF", color: "#7A1313", fontFamily: "'Inter'" }}>
+              Ban permanently
+            </button>
+          </>
+        ) : (
+          <button onClick={() => onBan(p.id, "unban")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
+            Unban
+          </button>
+        )}
+      </div>
+      <button
+        onClick={() => onShadowToggle(p.id, p.is_shadow_banned)}
+        className="px-3 py-1 rounded-full text-[12px] font-semibold"
+        style={{ background: p.is_shadow_banned ? "#EAF3FB" : "#16324A", color: p.is_shadow_banned ? "#16324A" : "#FFFFFF", fontFamily: "'Inter'" }}
+      >
+        {p.is_shadow_banned ? "Remove shadow ban" : "Shadow ban"}
+      </button>
+    </div>
+  );
+}
+
 function AdminPage({ onBack, user }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -1423,6 +1466,10 @@ function AdminPage({ onBack, user }) {
   const [confirmingId, setConfirmingId] = useState(null);
   const [pendingVerifications, setPendingVerifications] = useState([]);
   const [loadingVerifications, setLoadingVerifications] = useState(true);
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [userPosts, setUserPosts] = useState([]);
+  const [loadingUserPosts, setLoadingUserPosts] = useState(false);
+  const [userConfirmingId, setUserConfirmingId] = useState(null);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
@@ -1431,6 +1478,52 @@ function AdminPage({ onBack, user }) {
     loadRecentReports();
     loadPendingVerifications();
   }, [isAdmin]);
+
+  async function openProfile(p) {
+    setSelectedProfile(p);
+    setLoadingUserPosts(true);
+    const { data: hData } = await supabase.from("hospital_reviews").select("*, hospitals(id, name, city)").eq("user_id", p.id).order("created_at", { ascending: false });
+    const { data: uData } = await supabase.from("unit_reviews").select("*, units(id, name, hospital_id, hospitals(id, name, city))").eq("user_id", p.id).order("created_at", { ascending: false });
+    const combined = [
+      ...(hData || []).map((r) => ({ ...r, _type: "hospital" })),
+      ...(uData || []).map((r) => ({ ...r, _type: "unit" })),
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const withHospitalId = combined.map((r) => ({ ...r, _hospitalId: r._type === "hospital" ? r.hospitals?.id : r.units?.hospital_id }));
+    const { data: vData } = await supabase.from("hospital_verifications").select("hospital_id").eq("status", "verified").eq("user_id", p.id);
+    const verifiedHospitalIds = new Set((vData || []).map((v) => v.hospital_id));
+    setUserPosts(withHospitalId.map((r) => ({ ...r, _verified: verifiedHospitalIds.has(r._hospitalId) })));
+    setLoadingUserPosts(false);
+  }
+
+  function closeProfile() {
+    setSelectedProfile(null);
+    setUserPosts([]);
+  }
+
+  async function verifyUserPost(report) {
+    if (!report._hospitalId) return;
+    const { data: existing } = await supabase
+      .from("hospital_verifications")
+      .select("id")
+      .eq("user_id", report.user_id)
+      .eq("hospital_id", report._hospitalId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      await supabase.from("hospital_verifications").update({ status: "verified" }).eq("id", existing.id);
+    } else {
+      await supabase.from("hospital_verifications").insert({ user_id: report.user_id, hospital_id: report._hospitalId, status: "verified", file_path: null });
+    }
+    setUserPosts((prev) => prev.map((r) => (r._hospitalId === report._hospitalId ? { ...r, _verified: true } : r)));
+  }
+
+  async function handleDeleteUserPost(reportType, reportId) {
+    const table = reportType === "hospital" ? "hospital_reviews" : "unit_reviews";
+    await supabase.from(table).delete().eq("id", reportId);
+    setUserPosts((prev) => prev.filter((r) => r.id !== reportId));
+    setUserConfirmingId(null);
+  }
 
   async function loadPendingVerifications() {
     setLoadingVerifications(true);
@@ -1554,6 +1647,51 @@ function AdminPage({ onBack, user }) {
     );
   }
 
+  if (selectedProfile) {
+    return (
+      <StaticPage title={selectedProfile.email} onBack={closeProfile}>
+        <BanControls p={selectedProfile} banStatus={banStatus} onBan={(id, mode, days) => { applyBan(id, mode, days); setSelectedProfile((prev) => ({ ...prev, is_banned: mode === "permanent", banned_until: mode === "temp" ? new Date(Date.now() + days * 86400000).toISOString() : mode === "unban" ? null : prev.banned_until })); }} onShadowToggle={(id, cur) => { toggleShadowBan(id, cur); setSelectedProfile((prev) => ({ ...prev, is_shadow_banned: !cur })); }} />
+
+        <div className="pt-4">
+          <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Posts ({userPosts.length})</p>
+          {loadingUserPosts && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+          {!loadingUserPosts && userPosts.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>No posts from this account.</p>}
+          <div className="space-y-2">
+            {userPosts.map((r) => (
+              <div key={r.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>
+                  {r._type === "hospital" ? r.hospitals?.name : r.units?.name}
+                </div>
+                <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-1">
+                  {r._type === "hospital" ? r.hospitals?.city : r.units?.hospitals?.name} · {r.role} · {(r.created_at || "").slice(0, 10)}
+                </div>
+                <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }} className="mb-2">{r.comment}</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {userConfirmingId === r.id ? (
+                    <div className="flex items-center gap-2">
+                      <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete this report?</span>
+                      <button onClick={() => handleDeleteUserPost(r._type, r.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                      <button onClick={() => setUserConfirmingId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setUserConfirmingId(r.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+                  )}
+                  {r._verified ? (
+                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'", fontWeight: 700, fontSize: "11px" }}>
+                      <ShieldCheck size={11} /> Verified
+                    </span>
+                  ) : (
+                    <button onClick={() => verifyUserPost(r)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#0F9D6A" }}>Verify this account</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </StaticPage>
+    );
+  }
+
   return (
     <StaticPage title="Admin" onBack={onBack}>
       <div>
@@ -1563,49 +1701,15 @@ function AdminPage({ onBack, user }) {
           <PrimaryButton onClick={handleSearch}>{searching ? "…" : "Search"}</PrimaryButton>
         </div>
         <div className="space-y-2">
-          {results.map((p) => {
-            const status = banStatus(p);
-            return (
-              <div key={p.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+          {results.map((p) => (
+            <div key={p.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+              <div className="flex items-center justify-between mb-1">
                 <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{p.email}</div>
-                <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: status.color, fontWeight: 600 }} className="mb-1">{status.label}</div>
-                {p.is_shadow_banned && <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A5B00", fontWeight: 600 }} className="mb-2">🕶 Shadow banned</div>}
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {status.label === "Active" ? (
-                    <>
-                      <select id={`dur-${p.id}`} className="border rounded-full px-2 py-1 text-[12px]" style={{ ...inputStyle, background: "#FFFFFF" }} defaultValue="1">
-                        <option value="1">1 day</option>
-                        <option value="3">3 days</option>
-                        <option value="7">7 days</option>
-                        <option value="30">30 days</option>
-                      </select>
-                      <button
-                        onClick={(e) => { const sel = e.target.parentElement.querySelector("select"); applyBan(p.id, "temp", Number(sel.value)); }}
-                        className="px-3 py-1 rounded-full text-[12px] font-semibold"
-                        style={{ background: "#FCE985", color: "#7A5B00", fontFamily: "'Inter'" }}
-                      >
-                        Temp ban
-                      </button>
-                      <button onClick={() => applyBan(p.id, "permanent")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#F8AFAF", color: "#7A1313", fontFamily: "'Inter'" }}>
-                        Ban permanently
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => applyBan(p.id, "unban")} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
-                      Unban
-                    </button>
-                  )}
-                </div>
-                <button
-                  onClick={() => toggleShadowBan(p.id, p.is_shadow_banned)}
-                  className="px-3 py-1 rounded-full text-[12px] font-semibold"
-                  style={{ background: p.is_shadow_banned ? "#EAF3FB" : "#16324A", color: p.is_shadow_banned ? "#16324A" : "#FFFFFF", fontFamily: "'Inter'" }}
-                >
-                  {p.is_shadow_banned ? "Remove shadow ban" : "Shadow ban"}
-                </button>
+                <button onClick={() => openProfile(p)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>View posts →</button>
               </div>
-            );
-          })}
+              <BanControls p={p} banStatus={banStatus} onBan={applyBan} onShadowToggle={toggleShadowBan} />
+            </div>
+          ))}
           {results.length === 0 && query && !searching && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>No accounts found.</p>}
         </div>
       </div>

@@ -1470,6 +1470,8 @@ function AdminPage({ onBack, user }) {
   const [userPosts, setUserPosts] = useState([]);
   const [loadingUserPosts, setLoadingUserPosts] = useState(false);
   const [userConfirmingId, setUserConfirmingId] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(true);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
@@ -1477,7 +1479,28 @@ function AdminPage({ onBack, user }) {
     if (!isAdmin) return;
     loadRecentReports();
     loadPendingVerifications();
+    loadAnalytics();
   }, [isAdmin]);
+
+  async function loadAnalytics() {
+    setLoadingAnalytics(true);
+    const now = Date.now();
+    const since = (days) => new Date(now - days * 86400000).toISOString();
+    const countSince = async (table, days) => {
+      const { count } = await supabase.from(table).select("*", { count: "exact", head: true }).gte("created_at", since(days));
+      return count || 0;
+    };
+    const [users1, users7, users30, visits1, visits7, visits30] = await Promise.all([
+      countSince("profiles", 1),
+      countSince("profiles", 7),
+      countSince("profiles", 30),
+      countSince("page_views", 1),
+      countSince("page_views", 7),
+      countSince("page_views", 30),
+    ]);
+    setAnalytics({ users1, users7, users30, visits1, visits7, visits30 });
+    setLoadingAnalytics(false);
+  }
 
   async function openProfile(p) {
     setSelectedProfile(p);
@@ -1694,7 +1717,32 @@ function AdminPage({ onBack, user }) {
 
   return (
     <StaticPage title="Admin" onBack={onBack}>
-      <div>
+      <div className="mb-2">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Analytics</p>
+        {loadingAnalytics && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        {analytics && (
+          <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+            <div className="grid grid-cols-4 gap-2 mb-1" style={{ fontFamily: "'Inter'", fontSize: "11px", fontWeight: 700, color: "#64809A" }}>
+              <span></span><span className="text-center">24h</span><span className="text-center">7d</span><span className="text-center">30d</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2 items-center py-2" style={{ borderTop: "1px solid #EEF4FA" }}>
+              <span style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>New users</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.users1}</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.users7}</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.users30}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2 items-center py-2" style={{ borderTop: "1px solid #EEF4FA" }}>
+              <span style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>Site visits</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.visits1}</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.visits7}</span>
+              <span className="text-center" style={{ fontFamily: "'Poppins'", fontWeight: 700, color: "#16324A" }}>{analytics.visits30}</span>
+            </div>
+          </div>
+        )}
+        <p style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#93A7B8" }} className="pt-1">"Site visits" counts each time the app loads, not unique people — someone visiting twice counts twice.</p>
+      </div>
+
+      <div className="pt-3">
         <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Search users</p>
         <div className="flex gap-2 mb-3">
           <TextInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by email…" />
@@ -2230,6 +2278,7 @@ export default function App() {
       setUser(session?.user ?? null);
       if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
     });
+    supabase.from("page_views").insert({}).then(() => {});
     return () => listener.subscription.unsubscribe();
   }, []);
 

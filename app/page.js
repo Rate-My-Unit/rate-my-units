@@ -1552,6 +1552,8 @@ function AdminPage({ onBack, user }) {
   const [loadingFlagged, setLoadingFlagged] = useState(true);
   const [deletionQueue, setDeletionQueue] = useState([]);
   const [loadingDeletionQueue, setLoadingDeletionQueue] = useState(true);
+  const [errorLogs, setErrorLogs] = useState([]);
+  const [loadingErrors, setLoadingErrors] = useState(true);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
@@ -1562,7 +1564,20 @@ function AdminPage({ onBack, user }) {
     loadAnalytics();
     loadFlaggedReports();
     loadDeletionQueue();
+    loadErrorLogs();
   }, [isAdmin]);
+
+  async function loadErrorLogs() {
+    setLoadingErrors(true);
+    const { data } = await supabase.from("error_logs").select("*").eq("resolved", false).order("created_at", { ascending: false }).limit(30);
+    setErrorLogs(data || []);
+    setLoadingErrors(false);
+  }
+
+  async function dismissError(id) {
+    await supabase.from("error_logs").update({ resolved: true }).eq("id", id);
+    setErrorLogs((prev) => prev.filter((e) => e.id !== id));
+  }
 
   async function loadDeletionQueue() {
     setLoadingDeletionQueue(true);
@@ -1886,6 +1901,32 @@ function AdminPage({ onBack, user }) {
               </div>
               <button onClick={() => markDeletionHandled(p.id)} className="px-3 py-1 rounded-full text-[12px] font-semibold flex-shrink-0" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
                 Mark handled
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-3">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Errors ({errorLogs.length})</p>
+        {loadingErrors && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        {!loadingErrors && errorLogs.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>No unresolved errors.</p>}
+        <div className="space-y-2">
+          {errorLogs.map((e) => (
+            <div key={e.id} className="rounded-xl p-3" style={{ border: "1px solid #F8AFAF", background: "#FFFFFF" }}>
+              <div style={{ fontFamily: "'Inter'", fontWeight: 700, fontSize: "13px", color: "#7A1313" }} className="mb-1">{e.message}</div>
+              <div style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#93A7B8" }} className="mb-2">{e.page} · {(e.created_at || "").slice(0, 19).replace("T", " ")}</div>
+              {e.user_description && (
+                <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A", fontStyle: "italic" }} className="mb-2">"{e.user_description}"</p>
+              )}
+              {e.stack && (
+                <details className="mb-2">
+                  <summary style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#3E8EDE", cursor: "pointer" }}>Stack trace</summary>
+                  <pre style={{ fontSize: "10.5px", color: "#64809A", whiteSpace: "pre-wrap", marginTop: 4 }}>{e.stack}</pre>
+                </details>
+              )}
+              <button onClick={() => dismissError(e.id)} className="px-3 py-1 rounded-full text-[12px] font-semibold" style={{ background: "#EAF3FB", color: "#16324A", fontFamily: "'Inter'" }}>
+                Dismiss
               </button>
             </div>
           ))}
@@ -2558,6 +2599,66 @@ function SetNewPasswordPanel({ onDone }) {
   );
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorId: null, description: "", sent: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  async componentDidCatch(error, info) {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id || null;
+      const { data } = await supabase.from("error_logs").insert({
+        message: error?.message || String(error),
+        stack: (error?.stack || "").slice(0, 4000),
+        page: this.props.page || "unknown",
+        user_id: uid,
+      }).select().single();
+      this.setState({ errorId: data?.id });
+    } catch (e) {
+      // logging failed — nothing more we can do here
+    }
+  }
+  async handleSendDescription() {
+    if (!this.state.errorId || !this.state.description.trim()) return;
+    await supabase.from("error_logs").update({ user_description: this.state.description.trim() }).eq("id", this.state.errorId);
+    this.setState({ sent: true });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ background: "#EAF3FB", minHeight: "60vh" }} className="flex items-center justify-center p-6">
+          <div className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "#FFFFFF", border: "1px solid #D7E6F3" }}>
+            <p style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.1rem", color: "#16324A" }} className="mb-2">Something went wrong</p>
+            <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }} className="mb-4">An error occurred and the admin was notified. Sorry about that.</p>
+            {this.state.sent ? (
+              <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#0F5132", fontWeight: 600 }} className="mb-4">Thanks — that helps us fix it.</p>
+            ) : (
+              <div className="mb-4">
+                <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>What were you trying to do? (optional)</label>
+                <textarea
+                  value={this.state.description}
+                  onChange={(e) => this.setState({ description: e.target.value })}
+                  rows={3}
+                  placeholder="e.g. I was posting a report on..."
+                  className="w-full border rounded-xl px-3.5 py-2.5 text-sm"
+                  style={{ borderColor: "#D7E6F3", fontFamily: "'Inter'", color: "#16324A" }}
+                />
+                <button onClick={() => this.handleSendDescription()} className="mt-2 px-4 py-2 rounded-xl text-sm text-white font-semibold" style={{ background: "#3E8EDE", fontFamily: "'Inter'" }}>Send</button>
+              </div>
+            )}
+            <button onClick={() => window.location.reload()} className="w-full px-4 py-2.5 rounded-xl text-sm text-white font-semibold" style={{ background: "#16324A", fontFamily: "'Inter'" }}>Reload page</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2603,7 +2704,27 @@ export default function App() {
       if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
     });
     supabase.from("page_views").insert({}).then(() => {});
-    return () => listener.subscription.unsubscribe();
+
+    function logRuntimeError(message, stack) {
+      supabase.auth.getSession().then(({ data }) => {
+        const uid = data.session?.user?.id || null;
+        supabase.from("error_logs").insert({ message, stack: (stack || "").slice(0, 4000), page: "runtime", user_id: uid }).then(() => {});
+      });
+    }
+    function onWindowError(event) {
+      logRuntimeError(event?.message || "Unknown error", event?.error?.stack);
+    }
+    function onUnhandledRejection(event) {
+      logRuntimeError(event?.reason?.message || String(event?.reason) || "Unhandled promise rejection", event?.reason?.stack);
+    }
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+    return () => {
+      listener.subscription.unsubscribe();
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
   }, []);
 
   useEffect(() => {
@@ -2712,6 +2833,7 @@ export default function App() {
       {recoveryMode && <SetNewPasswordPanel onDone={() => setRecoveryMode(false)} />}
 
       <main className="max-w-2xl mx-auto px-5 py-8">
+        <ErrorBoundary page={view.page}>
         {view.page === "home" && <HomeView hospitals={hospitals} onSelectHospital={(h) => setView({ page: "hospital", hospital: h })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
         {view.page === "allUnits" && <AllUnitsView hospitals={hospitals} onSelectUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: view })} onOpenAddUnit={() => setView({ page: "addUnit", from: view })} />}
 
@@ -2789,6 +2911,7 @@ export default function App() {
             onDeleteAccount={deleteMyAccount}
           />
         )}
+        </ErrorBoundary>
       </main>
     </div>
   );

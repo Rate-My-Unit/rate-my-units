@@ -9,6 +9,15 @@ import { supabase } from "../lib/supabaseClient";
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');`;
 const ADMIN_USER_ID = "2d793bf4-08af-4382-b074-47c5ef968611";
+const CALCULATOR_DAILY_LIMIT = 200;
+
+async function checkCalculatorLimit() {
+  const since = new Date(Date.now() - 86400000).toISOString();
+  const { count } = await supabase.from("calculator_lookups").select("*", { count: "exact", head: true }).gte("created_at", since);
+  if ((count || 0) >= CALCULATOR_DAILY_LIMIT) return false;
+  supabase.from("calculator_lookups").insert({}).then(() => {});
+  return true;
+}
 
 const UNIT_CATEGORIES = [
   { key: "ratios", label: "Staffing ratios", icon: Users },
@@ -1184,6 +1193,12 @@ function IncomeCalculatorPage({ onBack }) {
     }
 
     setStatus("loading");
+    const allowed = await checkCalculatorLimit();
+    if (!allowed) {
+      setResults({ taxable, contractStipends: contractStipendsNum, contractTotal: taxable + contractStipendsNum, gsaWeekly: null });
+      setStatus("limited");
+      return;
+    }
     try {
       const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
       const url = city.trim()
@@ -1284,12 +1299,14 @@ function IncomeCalculatorPage({ onBack }) {
           <PrimaryButton onClick={handleCalculate} color="#0F9D6A">{status === "loading" ? "Calculating…" : "Calculate"}</PrimaryButton>
         </div>
 
-        {status === "notfound" && (
+        {(status === "notfound" || status === "limited") && (
           <div className="pt-3">
             <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">
-              {stateAbbr ? "Couldn't find a GSA rate for that city. Enter it manually to compare, or check gsa.gov/perdiem:" : "Pick a state to compare against the GSA max, or just review your contract numbers below."}
+              {status === "limited"
+                ? "We've hit our shared daily limit for rate lookups. Enter it manually to compare, or check gsa.gov/perdiem:"
+                : stateAbbr ? "Couldn't find a GSA rate for that city. Enter it manually to compare, or check gsa.gov/perdiem:" : "Pick a state to compare against the GSA max, or just review your contract numbers below."}
             </p>
-            {stateAbbr && (
+            {(stateAbbr || status === "limited") && (
               <div className="flex gap-2 items-center">
                 <TextInput value={manualGsaWeekly} onChange={(e) => setManualGsaWeekly(e.target.value)} placeholder="GSA weekly stipend ($)" />
                 <PrimaryButton onClick={handleManualGsa} color="#64809A">Use this</PrimaryButton>
@@ -1380,6 +1397,8 @@ function GsaCalculatorPage({ onBack }) {
     if (!stateAbbr) return;
     setStatus("loading");
     setWeekly(null);
+    const allowed = await checkCalculatorLimit();
+    if (!allowed) { setStatus("limited"); return; }
     try {
       const apiKey = process.env.NEXT_PUBLIC_GSA_API_KEY;
       const url = city.trim()
@@ -1452,9 +1471,11 @@ function GsaCalculatorPage({ onBack }) {
           <PrimaryButton onClick={handleCalculate} color="#0F9D6A">{status === "loading" ? "Calculating…" : "Calculate"}</PrimaryButton>
         </div>
 
-        {status === "notfound" && (
+        {(status === "notfound" || status === "limited") && (
           <div className="pt-3">
-            <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">Couldn't find that rate. Look it up at gsa.gov/perdiem and enter it manually:</p>
+            <p style={{ color: "#7A5B00", fontSize: "12.5px", fontFamily: "'Inter'" }} className="mb-2">
+              {status === "limited" ? "We've hit our shared daily limit for rate lookups. Look it up at gsa.gov/perdiem and enter it manually:" : "Couldn't find that rate. Look it up at gsa.gov/perdiem and enter it manually:"}
+            </p>
             <div className="grid grid-cols-2 gap-3 mb-2">
               <TextInput value={manualLodging} onChange={(e) => setManualLodging(e.target.value)} placeholder="Lodging / night ($)" />
               <TextInput value={manualMeals} onChange={(e) => setManualMeals(e.target.value)} placeholder="Meals / day ($)" />

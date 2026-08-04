@@ -522,9 +522,15 @@ function ReviewForm({ categories, reviewType, hospitalId, hospitalName, onSubmit
       return;
     }
     setSubmitting(true);
-    const id = await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
+    const result = await onSubmit({ role: role.trim(), comment: comment.trim(), ...ratings });
     setSubmitting(false);
-    if (id) { setStep("verify"); } else { setError("Your report couldn't be posted. If this keeps happening, contact support@ratemyunit.org."); }
+    if (result?.id) {
+      setStep("verify");
+    } else if (result?.error?.code === "23505") {
+      setError("You've already posted a report here — each account can only post once per hospital or unit.");
+    } else {
+      setError("Your report couldn't be posted. You may have hit today's 5-report limit, or something else blocked it. If this keeps happening, contact support@ratemyunit.org.");
+    }
   }
 
   if (step === "verify") {
@@ -1544,6 +1550,8 @@ function AdminPage({ onBack, user }) {
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
   const [flaggedReports, setFlaggedReports] = useState([]);
   const [loadingFlagged, setLoadingFlagged] = useState(true);
+  const [deletionQueue, setDeletionQueue] = useState([]);
+  const [loadingDeletionQueue, setLoadingDeletionQueue] = useState(true);
 
   const isAdmin = user && user.id === ADMIN_USER_ID;
 
@@ -1553,7 +1561,20 @@ function AdminPage({ onBack, user }) {
     loadPendingVerifications();
     loadAnalytics();
     loadFlaggedReports();
+    loadDeletionQueue();
   }, [isAdmin]);
+
+  async function loadDeletionQueue() {
+    setLoadingDeletionQueue(true);
+    const { data } = await supabase.from("profiles").select("*").not("deletion_requested_at", "is", null).order("deletion_requested_at", { ascending: false });
+    setDeletionQueue(data || []);
+    setLoadingDeletionQueue(false);
+  }
+
+  async function markDeletionHandled(profileId) {
+    await supabase.from("profiles").update({ deletion_requested_at: null }).eq("id", profileId);
+    setDeletionQueue((prev) => prev.filter((p) => p.id !== profileId));
+  }
 
   async function loadFlaggedReports() {
     setLoadingFlagged(true);
@@ -1850,6 +1871,25 @@ function AdminPage({ onBack, user }) {
           </div>
         )}
         <p style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#93A7B8" }} className="pt-1">"Site visits" counts each time the app loads, not unique people — someone visiting twice counts twice.</p>
+      </div>
+
+      <div className="pt-3">
+        <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Recently deleted accounts ({deletionQueue.length})</p>
+        {loadingDeletionQueue && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
+        {!loadingDeletionQueue && deletionQueue.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Nothing waiting.</p>}
+        <div className="space-y-2">
+          {deletionQueue.map((p) => (
+            <div key={p.id} className="rounded-xl p-3 flex items-center justify-between" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+              <div>
+                <div style={{ fontFamily: "'Inter'", fontWeight: 600, fontSize: "13.5px", color: "#16324A" }}>{p.email}</div>
+                <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }}>Requested {(p.deletion_requested_at || "").slice(0, 10)} — their content is already gone; just remove their login in Authentication → Users</div>
+              </div>
+              <button onClick={() => markDeletionHandled(p.id)} className="px-3 py-1 rounded-full text-[12px] font-semibold flex-shrink-0" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'" }}>
+                Mark handled
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="pt-3">
@@ -2185,6 +2225,44 @@ function ContactPage({ onBack }) {
     </StaticPage>
   );
 }
+function DeleteAccountSection({ onDeleteAccount }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    setDeleting(true);
+    await onDeleteAccount();
+  }
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)} className="text-[13px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete my account</button>;
+  }
+
+  return (
+    <div className="rounded-xl p-4 mt-2" style={{ border: "1px solid #F8AFAF", background: "#FFFFFF" }}>
+      <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }} className="mb-2">
+        This permanently deletes every report, vote, and verification request tied to your account, and signs you out.
+      </p>
+      <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-3">
+        Note: your login itself (email) can't be fully removed automatically. If you'd also like that gone, email support@ratemyunit.org after this and we'll take care of it.
+      </p>
+      {!confirming ? (
+        <div className="flex gap-2">
+          <button onClick={() => setConfirming(true)} className="px-4 py-2 rounded-xl text-sm text-white font-semibold" style={{ background: "#7A1313", fontFamily: "'Inter'" }}>Delete my account</button>
+          <GhostButton onClick={() => setOpen(false)}>Cancel</GhostButton>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <span style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#7A1313", fontWeight: 600 }}>Are you sure?</span>
+          <button onClick={handleDelete} className="text-[13px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>{deleting ? "Deleting…" : "Yes, delete everything"}</button>
+          <button onClick={() => setConfirming(false)} className="text-[13px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChangePasswordForm() {
   const [open, setOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -2231,7 +2309,7 @@ function ChangePasswordForm() {
   );
 }
 
-function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview }) {
+function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview, onDeleteAccount }) {
   const [myHospitalReviews, setMyHospitalReviews] = useState([]);
   const [myUnitReviews, setMyUnitReviews] = useState([]);
   const [likedReports, setLikedReports] = useState([]);
@@ -2303,6 +2381,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
     <StaticPage title="My Account" onBack={onBack}>
       <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>Signed in as <strong>{user.email}</strong></p>
       <div className="pt-1"><ChangePasswordForm /></div>
+      <div className="pt-2"><DeleteAccountSection onDeleteAccount={onDeleteAccount} /></div>
 
       {loadingMine && <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#64809A" }} className="pt-2">Loading your reports…</p>}
 
@@ -2532,19 +2611,29 @@ export default function App() {
   }, [user?.id]);
 
   async function addUnitReview(unitId, review) {
-    const { data } = await supabase.from("unit_reviews").insert({ unit_id: unitId, user_id: user.id, ...review }).select().single();
+    const { data, error } = await supabase.from("unit_reviews").insert({ unit_id: unitId, user_id: user.id, ...review }).select().single();
     await fetchHospitals();
-    return data?.id;
+    return { id: data?.id, error };
   }
   async function addHospitalReview(hospitalId, review) {
-    const { data } = await supabase.from("hospital_reviews").insert({ hospital_id: hospitalId, user_id: user.id, ...review }).select().single();
+    const { data, error } = await supabase.from("hospital_reviews").insert({ hospital_id: hospitalId, user_id: user.id, ...review }).select().single();
     await fetchHospitals();
-    return data?.id;
+    return { id: data?.id, error };
   }
   async function deleteReview(reviewType, reviewId) {
     const table = reviewType === "hospital" ? "hospital_reviews" : "unit_reviews";
     await supabase.from(table).delete().eq("id", reviewId);
     await fetchHospitals();
+  }
+  async function deleteMyAccount() {
+    await supabase.from("hospital_reviews").delete().eq("user_id", user.id);
+    await supabase.from("unit_reviews").delete().eq("user_id", user.id);
+    await supabase.from("review_votes").delete().eq("user_id", user.id);
+    await supabase.from("hospital_verifications").delete().eq("user_id", user.id);
+    await supabase.rpc("request_account_deletion");
+    await fetchHospitals();
+    await supabase.auth.signOut();
+    setView({ page: "home" });
   }
   async function reportPost(postType, postId, reason) {
     if (!user) return;
@@ -2697,6 +2786,7 @@ export default function App() {
             onGoToHospital={(h) => setView({ page: "hospital", hospital: h })}
             onGoToUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: { page: "account" } })}
             onDeleteReview={deleteReview}
+            onDeleteAccount={deleteMyAccount}
           />
         )}
       </main>

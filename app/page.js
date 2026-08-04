@@ -2355,8 +2355,21 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
   const [myUnitReviews, setMyUnitReviews] = useState([]);
   const [likedReports, setLikedReports] = useState([]);
   const [dislikedReports, setDislikedReports] = useState([]);
+  const [myVerifications, setMyVerifications] = useState([]);
   const [loadingMine, setLoadingMine] = useState(true);
   const [confirmingId, setConfirmingId] = useState(null);
+  const [confirmingVerificationId, setConfirmingVerificationId] = useState(null);
+
+  async function loadMyVerifications() {
+    const { data } = await supabase.from("hospital_verifications").select("*, hospitals(id, name, city)").eq("user_id", user.id).order("created_at", { ascending: false });
+    setMyVerifications(data || []);
+  }
+
+  async function handleDeleteVerification(id) {
+    await supabase.from("hospital_verifications").delete().eq("id", id);
+    setMyVerifications((prev) => prev.filter((v) => v.id !== id));
+    setConfirmingVerificationId(null);
+  }
 
   useEffect(() => {
     if (!user) { setLoadingMine(false); return; }
@@ -2374,6 +2387,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
         .order("created_at", { ascending: false });
       setMyHospitalReviews(hData || []);
       setMyUnitReviews(uData || []);
+      await loadMyVerifications();
 
       const { data: votes } = await supabase
         .from("review_votes")
@@ -2428,6 +2442,44 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
 
       {!loadingMine && (
         <>
+          <div className="pt-3">
+            <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Verification requests ({myVerifications.length})</h2>
+            {myVerifications.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't submitted any verification requests.</p>}
+            <div className="space-y-2">
+              {myVerifications.map((v) => (
+                <div key={v.id} className="rounded-xl p-3" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
+                  <div style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "0.9rem", color: "#16324A" }}>{v.hospitals?.name}</div>
+                  <div style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#64809A" }} className="mb-2">
+                    {v.hospitals?.city} · submitted {(v.created_at || "").slice(0, 10)}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold"
+                      style={{
+                        background: v.status === "verified" ? "#A9F0CE" : v.status === "rejected" ? "#F8AFAF" : "#FCE985",
+                        color: v.status === "verified" ? "#0F5132" : v.status === "rejected" ? "#7A1313" : "#7A5B00",
+                      }}
+                    >
+                      {v.status === "verified" ? "Verified" : v.status === "rejected" ? "Rejected" : "Pending review"}
+                    </span>
+                    {v.status === "pending" && (
+                      confirmingVerificationId === v.id ? (
+                        <div className="flex items-center gap-2">
+                          <span style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#7A1313" }}>Delete?</span>
+                          <button onClick={() => handleDeleteVerification(v.id)} className="text-[12px] font-bold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Yes</button>
+                          <button onClick={() => setConfirmingVerificationId(null)} className="text-[12px]" style={{ fontFamily: "'Inter'", color: "#64809A" }}>Cancel</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmingVerificationId(v.id)} className="text-[12px] font-semibold" style={{ fontFamily: "'Inter'", color: "#7A1313" }}>Delete</button>
+                      )
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontFamily: "'Inter'", fontSize: "11.5px", color: "#93A7B8" }} className="pt-1">Only one pending request is allowed at a time. Delete a pending one to submit a new one.</p>
+          </div>
+
           <div className="pt-3">
             <h2 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1rem", color: "#16324A" }} className="mb-2">Hospital reports ({myHospitalReviews.length})</h2>
             {myHospitalReviews.length === 0 && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>You haven't rated any hospitals yet.</p>}

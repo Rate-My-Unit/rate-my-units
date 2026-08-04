@@ -11,11 +11,11 @@ const UNIT_CATEGORIES = [
 
 function avg(reviews, key) {
   if (!reviews || !reviews.length) return 0;
-  return reviews.reduce((s, r) => s + (r[key] || 0), 0) / reviews.length;
+  return reviews.reduce((s, r) => s + (Number(r[key]) || 0), 0) / reviews.length;
 }
 function overallAvg(reviews, categories) {
   if (!reviews || !reviews.length) return 0;
-  const sum = reviews.reduce((s, r) => s + categories.reduce((cs, c) => cs + (r[c.key] || 0), 0) / categories.length, 0);
+  const sum = reviews.reduce((s, r) => s + categories.reduce((cs, c) => cs + (Number(r[c.key]) || 0), 0) / categories.length, 0);
   return sum / reviews.length;
 }
 function scoreColor(score) {

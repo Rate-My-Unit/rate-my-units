@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ShieldCheck, MapPin, Smile, Building2, Wifi, Star, Stethoscope, PartyPopper,
   UtensilsCrossed, Users, Briefcase, Heart, DollarSign, ThumbsUp, ThumbsDown,
-  Search, Plus, ArrowLeft, ArrowLeftRight, Menu, X, Lock,
+  Search, Plus, ArrowLeft, ArrowLeftRight, Menu, X, Lock, Home,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -39,11 +39,11 @@ const HOSPITAL_CATEGORIES = [
 
 function avg(reviews, key) {
   if (!reviews || !reviews.length) return 0;
-  return reviews.reduce((s, r) => s + (r[key] || 0), 0) / reviews.length;
+  return reviews.reduce((s, r) => s + (Number(r[key]) || 0), 0) / reviews.length;
 }
 function overallAvg(reviews, categories) {
   if (!reviews || !reviews.length) return 0;
-  const sum = reviews.reduce((s, r) => s + categories.reduce((cs, c) => cs + (r[c.key] || 0), 0) / categories.length, 0);
+  const sum = reviews.reduce((s, r) => s + categories.reduce((cs, c) => cs + (Number(r[c.key]) || 0), 0) / categories.length, 0);
   return sum / reviews.length;
 }
 function helpfulScore(r) {
@@ -85,11 +85,23 @@ function ScorePill({ score, size = "md", width }) {
 function Stars({ value, onChange, size = 20 }) {
   return (
     <div className="flex gap-1">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button key={n} type="button" onClick={onChange ? () => onChange(n) : undefined} style={{ lineHeight: 0 }} aria-label={`${n} of 5`}>
-          <Star size={size} fill={n <= value ? "#3E8EDE" : "none"} stroke="#3E8EDE" strokeWidth={1.6} />
-        </button>
-      ))}
+      {[1, 2, 3, 4, 5].map((n) => {
+        const fillPercent = Math.min(Math.max((value - (n - 1)) * 100, 0), 100);
+        return (
+          <div key={n} style={{ position: "relative", width: size, height: size, lineHeight: 0 }}>
+            <Star size={size} fill="none" stroke="#3E8EDE" strokeWidth={1.6} />
+            <div style={{ position: "absolute", top: 0, left: 0, width: `${fillPercent}%`, height: "100%", overflow: "hidden", pointerEvents: "none" }}>
+              <Star size={size} fill="#3E8EDE" stroke="#3E8EDE" strokeWidth={1.6} />
+            </div>
+            {onChange && (
+              <>
+                <button type="button" onClick={() => onChange(n - 0.5)} aria-label={`${n - 0.5} of 5`} style={{ position: "absolute", left: 0, top: 0, width: "50%", height: "100%", opacity: 0 }} />
+                <button type="button" onClick={() => onChange(n)} aria-label={`${n} of 5`} style={{ position: "absolute", right: 0, top: 0, width: "50%", height: "100%", opacity: 0 }} />
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -566,12 +578,17 @@ function ReviewForm({ categories, reviewType, hospitalId, hospitalName, onSubmit
           <TextInput value={role} onChange={(e) => setRole(e.target.value)} placeholder={rolePlaceholder} />
         </div>
         <div className="grid grid-cols-2 gap-4">
-          {categories.map((c) => (
-            <div key={c.key}>
-              <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>{c.label}</label>
-              <Stars value={ratings[c.key]} onChange={(n) => setRatings((r) => ({ ...r, [c.key]: n }))} />
-            </div>
-          ))}
+          {categories.map((c) => {
+            const Icon = c.icon;
+            return (
+              <div key={c.key}>
+                <label className="flex items-center gap-1.5 text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>
+                  {Icon && <Icon size={14} color="#3E8EDE" />} {c.label}
+                </label>
+                <Stars value={ratings[c.key]} onChange={(n) => setRatings((r) => ({ ...r, [c.key]: n }))} />
+              </div>
+            );
+          })}
         </div>
         <div>
           <label className="block text-[13px] mb-1 font-medium" style={{ fontFamily: "'Inter'", color: "#16324A" }}>Comment</label>
@@ -730,7 +747,7 @@ function AddUnitForm({ hospitals, onSubmit, onCancel, user, onOpenSignIn }) {
   );
 }
 
-function CompareView({ type, base, hospitals, onBack }) {
+function CompareView({ type, base, hospitals, onBack, onHome }) {
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState(null);
   const categories = type === "hospital" ? HOSPITAL_CATEGORIES : UNIT_CATEGORIES;
@@ -759,7 +776,10 @@ function CompareView({ type, base, hospitals, onBack }) {
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+      <div className="flex items-center gap-4 mb-4">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+        <button onClick={onHome} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><Home size={15} /> Home</button>
+      </div>
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-3" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Compare {type === "hospital" ? "hospitals" : "units"}</div>
 
       <div className="grid grid-cols-2 gap-3 mb-5">
@@ -828,7 +848,7 @@ function CompareView({ type, base, hospitals, onBack }) {
   );
 }
 
-function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onGetVerified, user, onOpenSignIn, autoOpenReview }) {
+function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onGetVerified, user, onOpenSignIn, autoOpenReview, onHome }) {
   const [showForm, setShowForm] = useState(!!autoOpenReview);
   const [reviewSort, setReviewSort] = useState("newest");
 
@@ -845,6 +865,7 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
     <div>
       <div className="flex items-center gap-4 mb-4">
         <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+        <button onClick={onHome} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><Home size={15} /> Home</button>
         <button onClick={onBackToHospital} className="text-[13px] font-semibold" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>{hospital.name}</button>
       </div>
       <div className="text-[11px] uppercase tracking-widest font-semibold mb-1" style={{ fontFamily: "'Inter'", color: "#3E8EDE" }}>Floor {unit.floor} · {unit.type}</div>
@@ -883,7 +904,7 @@ function UnitView({ hospital, unit, onBack, onBackToHospital, onAddReview, onDel
   );
 }
 
-function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onOpenAddUnit, onGetVerified, user, onOpenSignIn }) {
+function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteReview, onReportPost, onVote, userVotes, onCompare, onOpenAddUnit, onGetVerified, user, onOpenSignIn, onHome }) {
   const [tab, setTab] = useState("overview");
   const [sort, setSort] = useState("rating-desc");
   const [showForm, setShowForm] = useState(false);
@@ -915,7 +936,10 @@ function HospitalView({ hospital, onBack, onSelectUnit, onAddReview, onDeleteRev
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> All hospitals</button>
+      <div className="flex items-center gap-4 mb-4">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> All hospitals</button>
+        <button onClick={onHome} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><Home size={15} /> Home</button>
+      </div>
       <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.7rem", color: "#16324A" }}>{hospital.name}</h1>
       <div className="flex items-center justify-between mb-4 mt-1">
         <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#64809A" }}>{hospital.city}</p>
@@ -1118,10 +1142,15 @@ function HomeView({ hospitals, onSelectHospital, onOpenAddUnit }) {
   );
 }
 
-function StaticPage({ title, onBack, children }) {
+function StaticPage({ title, onBack, onHome, children }) {
   return (
     <div className="rounded-2xl p-6" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
-      {onBack && <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>}
+      {(onBack || onHome) && (
+        <div className="flex items-center gap-3 mb-4">
+          {onBack && <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>}
+          {onHome && <button onClick={onHome} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><Home size={15} /> Home</button>}
+        </div>
+      )}
       <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.5rem", color: "#16324A" }} className="mb-4">{title}</h1>
       <div style={{ fontFamily: "'Inter'", fontSize: "14.5px", color: "#33475A", lineHeight: 1.7 }} className="space-y-3">{children}</div>
     </div>
@@ -1129,7 +1158,7 @@ function StaticPage({ title, onBack, children }) {
 }
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
-function IncomeCalculatorPage({ onBack }) {
+function IncomeCalculatorPage({ onBack, onHome }) {
   const [date, setDate] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
   const [normalHours, setNormalHours] = useState("");
@@ -1232,7 +1261,7 @@ function IncomeCalculatorPage({ onBack }) {
   }
 
   return (
-    <StaticPage title="Income Calculator" onBack={onBack}>
+    <StaticPage title="Income Calculator" onBack={onBack} onHome={onHome}>
       <p>Compare what a contract's stipend actually offers against the GSA maximum allowable for that area. Enter your pay details and either the contract's weekly stipend, the location, or both.</p>
 
       <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
@@ -1352,7 +1381,7 @@ function IncomeCalculatorPage({ onBack }) {
   );
 }
 
-function GsaCalculatorPage({ onBack }) {
+function GsaCalculatorPage({ onBack, onHome }) {
   const [date, setDate] = useState("");
   const [stateAbbr, setStateAbbr] = useState("");
   const [city, setCity] = useState("");
@@ -1427,7 +1456,7 @@ function GsaCalculatorPage({ onBack }) {
   }
 
   return (
-    <StaticPage title="GSA Calculator" onBack={onBack}>
+    <StaticPage title="GSA Calculator" onBack={onBack} onHome={onHome}>
       <p>Estimate GSA per diem (lodging + meals &amp; incidentals) for a trip. These are official federal reimbursement rates. Many travel contracts use them as a reference, but your actual pay package depends on your employer or agency.</p>
 
       <div className="rounded-2xl p-4" style={{ border: "1px solid #D7E6F3", background: "#FFFFFF" }}>
@@ -1554,7 +1583,7 @@ function BanControls({ p, banStatus, onBan, onShadowToggle }) {
   );
 }
 
-function AdminPage({ onBack, user }) {
+function AdminPage({ onBack, user, onHome }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -1831,7 +1860,7 @@ function AdminPage({ onBack, user }) {
 
   if (!isAdmin) {
     return (
-      <StaticPage title="Admin" onBack={onBack}>
+      <StaticPage title="Admin" onBack={onBack} onHome={onHome}>
         <p>This page isn't available.</p>
       </StaticPage>
     );
@@ -1839,7 +1868,7 @@ function AdminPage({ onBack, user }) {
 
   if (selectedProfile) {
     return (
-      <StaticPage title={selectedProfile.email} onBack={closeProfile}>
+      <StaticPage title={selectedProfile.email} onBack={closeProfile} onHome={onHome}>
         <BanControls p={selectedProfile} banStatus={banStatus} onBan={(id, mode, days) => { applyBan(id, mode, days); setSelectedProfile((prev) => ({ ...prev, is_banned: mode === "permanent", banned_until: mode === "temp" ? new Date(Date.now() + days * 86400000).toISOString() : mode === "unban" ? null : prev.banned_until })); }} onShadowToggle={(id, cur) => { toggleShadowBan(id, cur); setSelectedProfile((prev) => ({ ...prev, is_shadow_banned: !cur })); }} />
 
         <div className="pt-4">
@@ -1883,7 +1912,7 @@ function AdminPage({ onBack, user }) {
   }
 
   return (
-    <StaticPage title="Admin" onBack={onBack}>
+    <StaticPage title="Admin" onBack={onBack} onHome={onHome}>
       <div className="mb-2">
         <p style={{ fontWeight: 700, color: "#16324A" }} className="mb-2">Analytics</p>
         {loadingAnalytics && <p style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#64809A" }}>Loading…</p>}
@@ -2078,7 +2107,7 @@ function AdminPage({ onBack, user }) {
   );
 }
 
-function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, prefillHospital }) {
+function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, prefillHospital, onHome }) {
   const [query, setQuery] = useState("");
   const [selectedHospital, setSelectedHospital] = useState(prefillHospital || null);
   const [unitName, setUnitName] = useState("");
@@ -2091,7 +2120,7 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
   }, [query, hospitals, selectedHospital]);
 
   return (
-    <StaticPage title="Get Verified" onBack={onBack}>
+    <StaticPage title="Get Verified" onBack={onBack} onHome={onHome}>
       <div className="flex items-center gap-2 rounded-xl px-3.5 py-3 mb-1" style={{ background: "#EAF3FB" }}>
         <span style={{ fontFamily: "'Inter'", fontSize: "13px", color: "#33475A" }}>Here's what you'll get on your reports:</span>
         <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1" style={{ background: "#A9F0CE", color: "#0F5132", fontFamily: "'Inter'", fontWeight: 700, fontSize: "12px" }}>
@@ -2154,13 +2183,13 @@ function GetVerifiedPage({ onBack, onGoBrowse, hospitals, user, onOpenSignIn, pr
     </StaticPage>
   );
 }
-function TermsPage({ onBack }) {
+function TermsPage({ onBack, onHome }) {
   return (
-    <StaticPage title="Terms of Service" onBack={onBack}>
+    <StaticPage title="Terms of Service" onBack={onBack} onHome={onHome}>
       <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }}>Effective August 2026</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>1. What this is</p>
-      <p>Rate My Unit lets healthcare workers rate and review the hospitals and specific units where they've worked, and helps job seekers see that feedback before accepting a position. By creating an account or using this site, you agree to these terms.</p>
+      <p>Rate My Unit lets healthcare workers rate and review the hospitals and specific units where they've worked, and helps job seekers see that feedback before accepting a position.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>2. Who can use this</p>
       <p>You must be at least 18 years old and able to enter a binding agreement to create an account. You're responsible for keeping your password secure and for anything that happens under your account.</p>
@@ -2179,25 +2208,25 @@ function TermsPage({ onBack }) {
       <p>We can remove any post, at any time, for any reason, including posts that don't break these rules but that we decide don't serve the site's purpose.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>4. Verification</p>
-      <p>You can optionally submit proof of employment — a badge photo, pay stub, or similar document — to have your reports marked Verified for a specific hospital. These documents are reviewed by our team, are never shown publicly, and are not shared with your employer or anyone else outside our review process. Submitting false verification documents will result in account termination.</p>
+      <p>You can optionally submit proof of employment. A badge photo, pay stub, or similar document to have your reports marked Verified for a specific hospital. These documents are reviewed by our team, are never shown publicly, and are not shared with your employer or anyone else outside our review process. Submitting false verification documents will result in account termination.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>5. Enforcement</p>
       <p>We can suspend, limit, or permanently ban any account for violating these terms or for conduct we determine is harmful to the site or its users. We don't owe advance notice or an explanation before doing so.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>6. No employment or legal advice</p>
-      <p>Nothing on this site is professional legal, tax, financial, or career advice. Ratings, calculators — including the GSA per diem and income tools — and reviews are informational estimates based on user submissions and public data; they may be inaccurate, outdated, or incomplete. Confirm anything important directly with the relevant employer or agency before relying on it.</p>
+      <p>Nothing on this site is professional legal, tax, financial, or career advice. Ratings and calculators including the GSA per diem, income tools, and reviews are informational estimates based on user submissions and public data; Although we update our data frequently…they may be inaccurate, outdated, or incomplete. Confirm anything important directly with the relevant employer or agency before relying on it.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>7. Content ownership</p>
       <p>You keep ownership of what you post, but by posting it you give us a permanent, worldwide, royalty-free license to display and use it as part of the site, including in aggregate or summarized form. We can keep and display content after you delete your account, since reviews are already posted anonymously and aren't tied to your identity for other users.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>8. Disclaimers</p>
-      <p>The site is provided as-is. We don't guarantee reviews are accurate, complete, or unbiased — they reflect individual opinions, not verified facts about any hospital, except where explicitly marked Verified, which only confirms employment, not the accuracy of the opinions themselves.</p>
+      <p>The site is provided as is. We don't guarantee reviews are accurate, complete, or unbiased. They reflect individual opinions, not verified facts about any hospital, except where explicitly marked Verified, which only confirms they worked at that location…not the accuracy of the opinions themselves.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>9. Limitation of liability</p>
       <p>To the extent allowed by law, we aren't liable for indirect, incidental, or consequential damages arising from your use of the site. Our total liability for any claim is limited to the amount you've paid us in the past 12 months, which for most users is $0.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>10. Changes</p>
-      <p>We can update these terms as the site evolves. Continued use after a change means you accept the new terms.</p>
+      <p>We can update these terms as the site evolves. As we push updates involving anything to do with terms of service or site updates, users will be notified accordingly. Continued use after a change means you accept the new terms.</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>11. Contact</p>
       <p>Questions about these terms: <a href="mailto:support@ratemyunit.org" style={{ color: "#3E8EDE" }}>support@ratemyunit.org</a></p>
@@ -2205,9 +2234,9 @@ function TermsPage({ onBack }) {
   );
 }
 
-function PrivacyPage({ onBack }) {
+function PrivacyPage({ onBack, onHome }) {
   return (
-    <StaticPage title="Privacy Policy" onBack={onBack}>
+    <StaticPage title="Privacy Policy" onBack={onBack} onHome={onHome}>
       <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }}>Effective August 2026</p>
 
       <p style={{ fontWeight: 700, color: "#16324A" }}>1. What we collect</p>
@@ -2254,16 +2283,16 @@ function PrivacyPage({ onBack }) {
   );
 }
 
-function AboutPage({ onBack }) {
+function AboutPage({ onBack, onHome }) {
   return (
-    <StaticPage title="What's the goal?" onBack={onBack}>
+    <StaticPage title="What's the goal?" onBack={onBack} onHome={onHome}>
       <p>Taking a hospital job is a big decision, and most people go in blind. Recruiters and hospital marketing tell you what the unit is like…but the people who actually know are the ones already working the floor.</p>
       <p><strong>Rate My Unit</strong> gives nurses, techs, and other staff a place to report what a specific unit is really like: staffing ratios, management, culture, and pay. The four things that can make or break a job. It also lets you rate the hospital as a whole, separately from units… on things like safety, reputation, facilities, food, etc.</p>
       <p><strong>The goal is simple:</strong> before you take your next big opportunity, you should be able to see what people who've actually worked there have to say.</p>
     </StaticPage>
   );
 }
-function HelpPage({ onBack }) {
+function HelpPage({ onBack, onHome }) {
   const faqs = [
     ["How do I post a report?", "Sign in with your email at the top of the page, then open any unit or hospital and click \"File a report\" or \"Rate this hospital.\""],
     ["Is my identity shown?", "No. Your email is used only to sign you in and is never displayed on your review or shared with anyone, including the hospital."],
@@ -2272,16 +2301,16 @@ function HelpPage({ onBack }) {
     ["Can I add a hospital or unit that's missing?", "Yes, use the \"Add a unit\" button in the header or the links on the search pages."],
   ];
   return (
-    <StaticPage title="Help" onBack={onBack}>
+    <StaticPage title="Help" onBack={onBack} onHome={onHome}>
       {faqs.map(([q, a], i) => (
         <div key={i}><p style={{ fontWeight: 700, color: "#16324A" }}>{q}</p><p>{a}</p></div>
       ))}
     </StaticPage>
   );
 }
-function ContactPage({ onBack }) {
+function ContactPage({ onBack, onHome }) {
   return (
-    <StaticPage title="Contact us" onBack={onBack}>
+    <StaticPage title="Contact us" onBack={onBack} onHome={onHome}>
       <p>Questions, feedback, or something not working right? Reach us directly at:</p>
       <a href="mailto:support@ratemyunit.org" className="inline-block" style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.05rem", color: "#3E8EDE" }}>support@ratemyunit.org</a>
     </StaticPage>
@@ -2371,7 +2400,7 @@ function ChangePasswordForm() {
   );
 }
 
-function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview, onDeleteAccount }) {
+function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, onDeleteReview, onDeleteAccount, onHome }) {
   const [myHospitalReviews, setMyHospitalReviews] = useState([]);
   const [myUnitReviews, setMyUnitReviews] = useState([]);
   const [likedReports, setLikedReports] = useState([]);
@@ -2446,7 +2475,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
 
   if (!user) {
     return (
-      <StaticPage title="My Account" onBack={onBack}>
+      <StaticPage title="My Account" onBack={onBack} onHome={onHome}>
         <p>Sign in to create your account and see the reports you've posted, all in one place.</p>
         <PrimaryButton onClick={onOpenSignIn}>Sign in</PrimaryButton>
       </StaticPage>
@@ -2454,7 +2483,7 @@ function AccountPage({ onBack, user, onOpenSignIn, onGoToHospital, onGoToUnit, o
   }
 
   return (
-    <StaticPage title="My Account" onBack={onBack}>
+    <StaticPage title="My Account" onBack={onBack} onHome={onHome}>
       <p style={{ fontFamily: "'Inter'", fontSize: "13.5px", color: "#33475A" }}>Signed in as <strong>{user.email}</strong></p>
       <div className="pt-1"><ChangePasswordForm /></div>
       <div className="pt-2"><DeleteAccountSection onDeleteAccount={onDeleteAccount} /></div>
@@ -2735,7 +2764,13 @@ class ErrorBoundary extends React.Component {
 export default function App() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState({ page: "home" });
+  const [view, setViewState] = useState({ page: "home" });
+  function setView(newView) {
+    if (typeof window !== "undefined") {
+      try { window.history.pushState({ view: newView }, "", window.location.pathname); } catch (e) {}
+    }
+    setViewState(newView);
+  }
   const [userVotes, setUserVotes] = useState({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState(null);
@@ -2793,10 +2828,17 @@ export default function App() {
     window.addEventListener("error", onWindowError);
     window.addEventListener("unhandledrejection", onUnhandledRejection);
 
+    try { window.history.replaceState({ view: { page: "home" } }, "", window.location.pathname); } catch (e) {}
+    function onPopState(event) {
+      setViewState(event.state?.view || { page: "home" });
+    }
+    window.addEventListener("popstate", onPopState);
+
     return () => {
       listener.subscription.unsubscribe();
       window.removeEventListener("error", onWindowError);
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      window.removeEventListener("popstate", onPopState);
     };
   }, []);
 
@@ -2925,6 +2967,7 @@ export default function App() {
             onGetVerified={(h) => setView({ page: "getVerified", prefillHospital: h, from: view })}
             user={user}
             onOpenSignIn={() => setSignInOpen(true)}
+            onHome={() => setView({ page: "home" })}
           />
         )}
 
@@ -2943,6 +2986,7 @@ export default function App() {
             onOpenSignIn={() => setSignInOpen(true)}
             autoOpenReview={view.autoOpenReview}
             onGetVerified={(h) => setView({ page: "getVerified", prefillHospital: h, from: view })}
+            onHome={() => setView({ page: "home" })}
             onCompare={() => setView({
               page: "compare", type: "unit",
               base: { ...hospitals.find((h) => h.id === view.hospital.id).units.find((u) => u.id === view.unit.id), hospitalName: view.hospital.name, hospitalCity: view.hospital.city },
@@ -2951,11 +2995,14 @@ export default function App() {
           />
         )}
 
-        {view.page === "compare" && <CompareView type={view.type} base={view.base} hospitals={hospitals} onBack={() => setView(view.from || { page: "home" })} />}
+        {view.page === "compare" && <CompareView type={view.type} base={view.base} hospitals={hospitals} onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
 
         {view.page === "addUnit" && (
           <div>
-            <button onClick={() => setView(view.from || { page: "home" })} className="flex items-center gap-1.5 text-[13px] mb-4 font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+            <div className="flex items-center gap-4 mb-4">
+              <button onClick={() => setView(view.from || { page: "home" })} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><ArrowLeft size={15} /> Back</button>
+              <button onClick={() => setView({ page: "home" })} className="flex items-center gap-1.5 text-[13px] font-medium" style={{ fontFamily: "'Inter'", color: "#64809A" }}><Home size={15} /> Home</button>
+            </div>
             <h1 style={{ fontFamily: "'Poppins'", fontWeight: 700, fontSize: "1.5rem", color: "#16324A" }} className="mb-4">Add a unit</h1>
             <AddUnitForm hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} onCancel={() => setView(view.from || { page: "home" })} onSubmit={async (payload) => {
               const result = await addUnit(payload);
@@ -2964,15 +3011,15 @@ export default function App() {
           </div>
         )}
 
-        {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} />}
-        {view.page === "admin" && <AdminPage onBack={() => setView(view.from || { page: "home" })} user={user} />}
-        {view.page === "gsaCalculator" && <GsaCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "incomeCalculator" && <IncomeCalculatorPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "terms" && <TermsPage onBack={() => setView(view.from || { page: "home" })} />}
-        {view.page === "privacy" && <PrivacyPage onBack={() => setView(view.from || { page: "home" })} />}
+        {view.page === "getVerified" && <GetVerifiedPage onBack={() => setView(view.from || { page: "home" })} onGoBrowse={() => setView({ page: "home" })} hospitals={hospitals} user={user} onOpenSignIn={() => setSignInOpen(true)} prefillHospital={view.prefillHospital} onHome={() => setView({ page: "home" })} />}
+        {view.page === "admin" && <AdminPage onBack={() => setView(view.from || { page: "home" })} user={user} onHome={() => setView({ page: "home" })} />}
+        {view.page === "gsaCalculator" && <GsaCalculatorPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "incomeCalculator" && <IncomeCalculatorPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "about" && <AboutPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "help" && <HelpPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "contact" && <ContactPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "terms" && <TermsPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
+        {view.page === "privacy" && <PrivacyPage onBack={() => setView(view.from || { page: "home" })} onHome={() => setView({ page: "home" })} />}
         {view.page === "account" && (
           <AccountPage
             onBack={() => setView(view.from || { page: "home" })}
@@ -2982,6 +3029,7 @@ export default function App() {
             onGoToUnit={(h, u) => setView({ page: "unit", hospital: h, unit: u, from: { page: "account" } })}
             onDeleteReview={deleteReview}
             onDeleteAccount={deleteMyAccount}
+            onHome={() => setView({ page: "home" })}
           />
         )}
         </ErrorBoundary>

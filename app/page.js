@@ -2245,7 +2245,7 @@ function DeleteAccountSection({ onDeleteAccount }) {
         This permanently deletes every report, vote, and verification request tied to your account, and signs you out.
       </p>
       <p style={{ fontFamily: "'Inter'", fontSize: "12px", color: "#93A7B8" }} className="mb-3">
-        Note: your login itself (email) can't be fully removed automatically. If you'd also like that gone, email support@ratemyunit.org after this and we'll take care of it.
+        Note: your login itself can't be removed automatically, but our team will take care of that shortly — no need to reach out about it.
       </p>
       {!confirming ? (
         <div className="flex gap-2">
